@@ -1,0 +1,15 @@
+[project]
+name = "select-hot-topic"
+version = "0.1.0"
+description = "Claude Code 관련 핫토픽을 수집하고 추천하는 CLI 툴"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "praw>=7.7.0",
+    "rich>=13.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+hot-topic = "main:cli"
