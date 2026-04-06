@@ -75,6 +75,85 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "",
+      "accessCount": 2,
+      "lastAccessed": 1775468278872,
+      "type": "directory"
+    },
+    {
+      "path": "main.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468293574,
+      "type": "file"
+    },
+    {
+      "path": "scorer.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468294254,
+      "type": "file"
+    },
+    {
+      "path": "history.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468294301,
+      "type": "file"
+    },
+    {
+      "path": "pyproject.toml",
+      "accessCount": 1,
+      "lastAccessed": 1775468294707,
+      "type": "file"
+    },
+    {
+      "path": "sources\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468295092,
+      "type": "file"
+    },
+    {
+      "path": "sources\\github_trending.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468300467,
+      "type": "file"
+    },
+    {
+      "path": "sources\\reddit_claude.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468301074,
+      "type": "file"
+    },
+    {
+      "path": "sources\\hacker_news.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468301618,
+      "type": "file"
+    },
+    {
+      "path": "sources\\youtube_search.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468302142,
+      "type": "file"
+    },
+    {
+      "path": "sources\\anthropic_releases.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468302453,
+      "type": "file"
+    },
+    {
+      "path": "sources\\geeknews.py",
+      "accessCount": 1,
+      "lastAccessed": 1775468302752,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1775468340443,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }
