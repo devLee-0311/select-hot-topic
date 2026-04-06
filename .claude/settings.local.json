@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python main.py --count 3)",
+      "Bash(python main.py --count 5)",
+      "Bash(python main.py)",
+      "Bash(python main.py --history)",
+      "Bash(python main.py -n 3)",
+      "Bash(python main.py -n 5)",
+      "WebFetch(domain:news.hada.io)",
+      "Bash(python -c ':*)",
+      "Bash(gh auth:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(gh repo:*)"
+    ]
+  }
+}

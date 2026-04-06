@@ -1,0 +1,80 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775464047478,
+  "projectRoot": "D:\\personal_project\\select-hot-topic",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "select_hot_topic.egg-info": {
+      "path": "select_hot_topic.egg-info",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1775464047397,
+      "keyFiles": [
+        "dependency_links.txt",
+        "entry_points.txt",
+        "PKG-INFO",
+        "requires.txt",
+        "SOURCES.txt"
+      ]
+    },
+    "sources": {
+      "path": "sources",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1775464047400,
+      "keyFiles": [
+        "anthropic_releases.py",
+        "geeknews.py",
+        "github_trending.py",
+        "hacker_news.py",
+        "reddit_claude.py"
+      ]
+    },
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775464047404,
+      "keyFiles": [
+        "history.cpython-314.pyc",
+        "scorer.cpython-314.pyc"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
