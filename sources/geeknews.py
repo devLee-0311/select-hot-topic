@@ -10,6 +10,8 @@ KEYWORDS = [
     "claude", "anthropic", "mcp", "llm", "ai agent", "agentic",
     "cursor", "copilot", "vibe coding", "클로드", "앤트로픽",
     "코딩 에이전트", "바이브 코딩", "openai", "gpt", "gemini",
+    "devtools", "cli", "개발자 도구", "터미널", "ide",
+    "린터", "빌드", "monorepo", "developer tool", "생산성",
 ]
 TIMEOUT = 10
 

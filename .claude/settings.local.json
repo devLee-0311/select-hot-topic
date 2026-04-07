@@ -13,7 +13,8 @@
       "Bash(gh auth:*)",
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(python:*)"
     ]
   }
 }

@@ -3,7 +3,11 @@
 import requests
 
 SEARCH_URL = "https://hn.algolia.com/api/v1/search"
-QUERIES = ["claude code", "anthropic claude", "claude AI", "MCP server"]
+QUERIES = [
+    "claude code", "anthropic claude", "claude AI", "MCP server",
+    "LLM", "OpenAI GPT", "AI agent", "AI coding",
+    "developer tools", "devtools CLI",
+]
 TIMEOUT = 10
 
 

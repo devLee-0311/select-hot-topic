@@ -10,6 +10,9 @@ KEYWORDS = [
     "openai", "gpt", "gemini", "chatbot", "rag", "langchain", "autogen",
     "agent", "prompt", "embedding", "transformer", "diffusion",
     "machine-learning", "deep-learning", "neural", "inference",
+    "devtools", "developer-tools", "cli-tool", "terminal", "ide",
+    "linter", "formatter", "bundler", "build-tool", "monorepo",
+    "dx", "developer-experience", "productivity",
 ]
 TIMEOUT = 10
 

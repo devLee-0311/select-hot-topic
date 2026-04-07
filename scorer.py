@@ -14,8 +14,8 @@ NOISE_WORDS = {
     "tell", "show", "ask", "hn",
 }
 
-# 비교 시 제거할 컨텍스트 공통어
-CONTEXT_NOISE = {"claude", "code", "anthropic", "ai", "built", "build"}
+# 비교 시 제거할 컨텍스트 공통어 (스코프가 넓으므로 최소한만)
+CONTEXT_NOISE = {"built", "build", "new", "use", "using", "get", "make"}
 
 # 관련 자료 판정: 유사도 임계값 + 최소 공유 키워드 수
 RELATED_THRESHOLD = 0.40
@@ -205,6 +205,9 @@ def _build_reasons(anchor: dict, related: list[dict]) -> list[str]:
 
     source_labels = {
         "reddit": "Reddit r/ClaudeAI",
+        "reddit_localllama": "Reddit r/LocalLLaMA",
+        "reddit_openai": "Reddit r/OpenAI",
+        "reddit_programming": "Reddit r/programming",
         "github_trending": "GitHub Trending",
         "hacker_news": "Hacker News",
         "youtube": "YouTube",

@@ -4,7 +4,11 @@ import requests
 from bs4 import BeautifulSoup
 
 SEARCH_URL = "https://www.youtube.com/results"
-QUERIES = ["claude code", "anthropic claude code", "claude code tutorial"]
+QUERIES = [
+    "claude code", "anthropic claude code", "claude code tutorial",
+    "LLM tutorial 2026", "AI coding agent", "openai gpt new",
+    "developer tools 2026", "best dev tools",
+]
 TIMEOUT = 10
 
 

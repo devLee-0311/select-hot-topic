@@ -1,4 +1,4 @@
-"""Claude Code 핫토픽 선정 CLI 툴."""
+"""AI/개발자 도구 핫토픽 선정 CLI 툴."""
 
 import argparse
 import sys
@@ -16,6 +16,9 @@ from sources import (
     fetch_github_trending,
     fetch_hacker_news,
     fetch_reddit_claude,
+    fetch_reddit_localllama,
+    fetch_reddit_openai,
+    fetch_reddit_programming,
     fetch_youtube_search,
 )
 
@@ -24,6 +27,9 @@ console = Console()
 SOURCE_FETCHERS = {
     "GitHub Trending": fetch_github_trending,
     "Reddit r/ClaudeAI": fetch_reddit_claude,
+    "Reddit r/LocalLLaMA": fetch_reddit_localllama,
+    "Reddit r/OpenAI": fetch_reddit_openai,
+    "Reddit r/programming": fetch_reddit_programming,
     "Hacker News": fetch_hacker_news,
     "YouTube": fetch_youtube_search,
     "GeekNews": fetch_geeknews,
@@ -32,6 +38,9 @@ SOURCE_FETCHERS = {
 
 SOURCE_ICONS = {
     "reddit": "[bold orange1]Reddit[/]",
+    "reddit_localllama": "[bold orange1]Reddit LLaMA[/]",
+    "reddit_openai": "[bold orange1]Reddit OpenAI[/]",
+    "reddit_programming": "[bold orange1]Reddit Prog[/]",
     "github_trending": "[bold white]GitHub[/]",
     "hacker_news": "[bold yellow]HN[/]",
     "youtube": "[bold red]YouTube[/]",
@@ -45,7 +54,7 @@ def collect_all() -> list[dict]:
     all_items = []
 
     with console.status("[bold green]데이터 수집 중...") as status:
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=9) as executor:
             futures = {
                 executor.submit(fn): name
                 for name, fn in SOURCE_FETCHERS.items()
@@ -128,7 +137,7 @@ def display_topic(topic: dict, rank: int = 1) -> None:
 def cli():
     """CLI 진입점."""
     parser = argparse.ArgumentParser(
-        description="Claude Code 관련 핫토픽을 수집하고 추천합니다.",
+        description="AI/LLM 및 개발자 도구 관련 핫토픽을 수집하고 추천합니다.",
     )
     parser.add_argument(
         "--count", "-n",
@@ -162,8 +171,8 @@ def cli():
 
     console.print(
         Panel(
-            "[bold]Claude Code 핫토픽 파인더[/]\n"
-            "여러 소스에서 최신 트렌드를 수집하여 유튜브 주제를 추천합니다.",
+            "[bold]AI & DevTools 핫토픽 파인더[/]\n"
+            "AI/LLM, 개발자 도구 트렌드를 수집하여 유튜브 주제를 추천합니다.",
             border_style="bright_blue",
         )
     )
