@@ -11,12 +11,12 @@ QUERIES = [
 TIMEOUT = 10
 
 
-def fetch_hacker_news() -> list[dict]:
-    """Hacker News에서 Claude/AI 관련 최근 인기글 검색."""
+def fetch_hacker_news(queries: list[str] | None = None) -> list[dict]:
+    """Hacker News에서 최근 인기글 검색. queries를 지정하면 해당 쿼리로 검색."""
     results = []
     seen_ids = set()
 
-    for query in QUERIES:
+    for query in (queries or QUERIES):
         try:
             resp = requests.get(
                 SEARCH_URL,

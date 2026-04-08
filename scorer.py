@@ -93,7 +93,7 @@ def _url_same_article(url_a: str, url_b: str) -> bool:
     return a == b
 
 
-def score_topics(all_items: list[dict], top_n: int = 5) -> list[dict]:
+def score_topics(all_items: list[dict], top_n: int = 5, weights: dict | None = None) -> list[dict]:
     """
     개별 아이템 기반 토픽 랭킹.
 
@@ -104,6 +104,14 @@ def score_topics(all_items: list[dict], top_n: int = 5) -> list[dict]:
     """
     if not all_items:
         return []
+
+    w = weights or {}
+    eng_multiplier = w.get("eng_multiplier", 0.02)
+    eng_cap = w.get("eng_cap", 40)
+    cross_bonus_per = w.get("cross_bonus", 15)
+    related_multiplier = w.get("related_multiplier", 0.01)
+    related_cap = w.get("related_cap", 15)
+    base = w.get("base_score", 20)
 
     # engagement 높은 순 정렬
     sorted_items = sorted(all_items, key=lambda x: x.get("engagement", 0), reverse=True)
@@ -140,17 +148,17 @@ def score_topics(all_items: list[dict], top_n: int = 5) -> list[dict]:
 
         # 스코어 계산
         base_eng = anchor.get("engagement", 0)
-        eng_score = min(base_eng * 0.02, 40)
+        eng_score = min(base_eng * eng_multiplier, eng_cap)
 
         # 교차 소스 보너스
         related_sources = {item["source"] for item in related}
-        cross_bonus = len(related_sources) * 15
+        cross_bonus = len(related_sources) * cross_bonus_per
 
         # 관련 자료 engagement 보너스
         related_eng = sum(item.get("engagement", 0) for item in related)
-        related_score = min(related_eng * 0.01, 15)
+        related_score = min(related_eng * related_multiplier, related_cap)
 
-        score = min(int(20 + eng_score + cross_bonus + related_score), 100)
+        score = min(int(base + eng_score + cross_bonus + related_score), 100)
 
         # 토픽 제목
         topic_title = anchor_title

@@ -16,8 +16,9 @@ KEYWORDS = [
 TIMEOUT = 10
 
 
-def fetch_geeknews() -> list[dict]:
-    """GeekNews에서 Claude/AI 관련 최신 글 수집."""
+def fetch_geeknews(keywords: list[str] | None = None) -> list[dict]:
+    """GeekNews에서 최신 글 수집. keywords를 지정하면 해당 키워드로 필터링."""
+    active_keywords = keywords or KEYWORDS
     results = []
     seen_ids = set()
 
@@ -89,7 +90,7 @@ def fetch_geeknews() -> list[dict]:
 
             # 키워드 필터링
             searchable = f"{title}".lower()
-            if not any(kw in searchable for kw in KEYWORDS):
+            if not any(kw in searchable for kw in active_keywords):
                 continue
 
             results.append({
