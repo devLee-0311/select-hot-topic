@@ -15,7 +15,7 @@ def load_history() -> list[dict]:
         return json.load(f)
 
 
-def save_topic(topic: dict) -> None:
+def save_topic(topic: dict, mode: str = "hot") -> None:
     """토픽을 이력에 저장."""
     history = load_history()
     history.append({
@@ -23,6 +23,7 @@ def save_topic(topic: dict) -> None:
         "score": topic["score"],
         "reasons": topic["reasons"],
         "references": [ref["url"] for ref in topic["references"]],
+        "mode": mode,
         "saved_at": datetime.now().isoformat(),
     })
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:

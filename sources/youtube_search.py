@@ -95,12 +95,12 @@ def _parse_view_count(text: str) -> int:
     return int(digits) if digits else 0
 
 
-def fetch_youtube_search() -> list[dict]:
-    """YouTube에서 Claude 관련 최신 영상 검색."""
+def fetch_youtube_search(queries: list[str] | None = None) -> list[dict]:
+    """YouTube에서 최신 영상 검색. queries를 지정하면 해당 쿼리로 검색."""
     results = []
     seen_urls = set()
 
-    for query in QUERIES:
+    for query in (queries or QUERIES):
         for item in _search_youtube(query):
             if item["url"] not in seen_urls:
                 seen_urls.add(item["url"])
