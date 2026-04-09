@@ -1,0 +1,67 @@
+[
+  {
+    "topic": "Claude Code source code leaked via map file",
+    "score": 90,
+    "reasons": [
+      "Hacker News에서 화제 (engagement 3,106)",
+      "관련 자료: Hacker News에서도 언급"
+    ],
+    "references": [
+      "https://twitter.com/Fried_rice/status/2038894956459290963",
+      "https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/"
+    ],
+    "saved_at": "2026-04-06T21:06:03.143549"
+  },
+  {
+    "topic": "Tell HN: Anthropic no longer allowing Claude Code subscription",
+    "score": 73,
+    "reasons": [
+      "Hacker News에서 화제 (engagement 1,919)",
+      "관련 자료: YouTube에서도 언급"
+    ],
+    "references": [
+      "https://news.ycombinator.com/item?id=47633396",
+      "https://www.youtube.com/watch?v=X6lXs8IcoHw"
+    ],
+    "saved_at": "2026-04-07T21:42:20.599088"
+  },
+  {
+    "topic": "You accidentally say \"Hello\" to Claude and it consumes 4% of your session",
+    "score": 60,
+    "reasons": [
+      "Reddit r/ClaudeAI에서 화제 (engagement 4,637)"
+    ],
+    "references": [
+      "https://reddit.com/r/ClaudeAI/comments/1sepqzw/you_accidentally_say_hello_to_claude_and_it/"
+    ],
+    "saved_at": "2026-04-08T21:49:56.990442"
+  },
+  {
+    "topic": "Something happened to Opus 4.6's reasoning effort",
+    "score": 60,
+    "reasons": [
+      "Reddit r/ClaudeAI에서 화제 (engagement 2,258)"
+    ],
+    "references": [
+      "https://reddit.com/r/ClaudeAI/comments/1sfw9b5/something_happened_to_opus_46s_reasoning_effort/"
+    ],
+    "saved_at": "2026-04-09T09:05:02.712910"
+  },
+  {
+    "topic": "Claude Mythos Preview - Project Glasswing 제한 공개",
+    "score": 85,
+    "reasons": [
+      "4월 7일 Project Glasswing으로 50개+ 기관 대상 제한 공개",
+      "사이버보안 특화 - 27년 된 OpenBSD 제로데이 발견으로 화제",
+      "AWS Bedrock / Google Vertex AI 게이트 프리뷰",
+      "CNBC, NBC, The Hacker News 등 주요 매체 대거 보도"
+    ],
+    "references": [
+      "https://www.cnbc.com/2026/04/07/anthropic-claude-mythos-ai-hackers-cyberattacks.html",
+      "https://thehackernews.com/2026/04/anthropics-claude-mythos-finds.html",
+      "https://red.anthropic.com/2026/mythos-preview/",
+      "https://www.vellum.ai/blog/everything-you-need-to-know-about-claude-mythos"
+    ],
+    "saved_at": "2026-04-09T09:14:23.296304"
+  }
+]

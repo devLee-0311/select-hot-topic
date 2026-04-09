@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1775464047478,
-  "projectRoot": "D:\\personal_project\\select-hot-topic",
+  "lastScanned": 1775729923961,
+  "projectRoot": "C:\\dev\\personal\\select-hot-topic",
   "techStack": {
     "languages": [
       {
@@ -34,7 +34,10 @@
     "isMonorepo": false,
     "workspaces": [],
     "mainDirectories": [],
-    "gitBranches": null
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
   },
   "customNotes": [],
   "directoryMap": {
@@ -42,7 +45,7 @@
       "path": "select_hot_topic.egg-info",
       "purpose": null,
       "fileCount": 6,
-      "lastAccessed": 1775464047397,
+      "lastAccessed": 1775729923936,
       "keyFiles": [
         "dependency_links.txt",
         "entry_points.txt",
@@ -54,8 +57,8 @@
     "sources": {
       "path": "sources",
       "purpose": null,
-      "fileCount": 7,
-      "lastAccessed": 1775464047400,
+      "fileCount": 8,
+      "lastAccessed": 1775729923936,
       "keyFiles": [
         "anthropic_releases.py",
         "geeknews.py",
@@ -68,7 +71,7 @@
       "path": "__pycache__",
       "purpose": null,
       "fileCount": 2,
-      "lastAccessed": 1775464047404,
+      "lastAccessed": 1775729923937,
       "keyFiles": [
         "history.cpython-314.pyc",
         "scorer.cpython-314.pyc"
