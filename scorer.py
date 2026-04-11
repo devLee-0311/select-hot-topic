@@ -181,6 +181,7 @@ def score_topics(all_items: list[dict], top_n: int = 5, weights: dict | None = N
 
         topics.append({
             "topic": topic_title,
+            "description": anchor.get("description", ""),
             "score": score,
             "reasons": reasons,
             "references": refs,

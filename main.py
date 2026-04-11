@@ -127,6 +127,11 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
         num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
         lines.append(f"{num_emoji} <b>{topic['topic']}</b>")
         lines.append(f"   📊 스코어: {score}/100")
+        desc = topic.get("description", "")
+        if desc and desc != topic["topic"]:
+            if len(desc) > 100:
+                desc = desc[:97] + "..."
+            lines.append(f"   📝 {desc}")
         for reason in topic["reasons"]:
             lines.append(f"   • {reason}")
         refs = topic.get("references", [])
@@ -239,7 +244,8 @@ def cli():
             console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
-    # 요청 수만큼만 출력
+    # 점수 높은 순 정렬 후 요청 수만큼만 출력
+    topics.sort(key=lambda t: t["score"], reverse=True)
     show_topics = topics[:args.count]
 
     if markdown_mode:

@@ -28,7 +28,14 @@ jobs:
       - name: Send to Telegram
         run: |
           set -e
-          MESSAGE=$(cat hot_result.txt; echo ""; echo "━━━━━━━━━━━━━━━"; echo ""; cat general_result.txt)
+          DATE=$(TZ=Asia/Seoul date +"%Y-%m-%d (%a)")
+          MESSAGE="📅 <b>${DATE}</b>
+
+$(cat hot_result.txt)
+
+━━━━━━━━━━━━━━━
+
+$(cat general_result.txt)"
           # Telegram 메시지 길이 제한 4096자 적용
           MESSAGE="${MESSAGE:0:4096}"
           curl -s -f -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
