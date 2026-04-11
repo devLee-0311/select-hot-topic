@@ -1,0 +1,37 @@
+name: Daily Hot Topic
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # UTC 23:00 = KST 08:00
+  workflow_dispatch:  # 수동 실행
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install .
+      - name: Collect hot topics
+        run: hot-topic --mode hot -n 3 --format markdown > hot_result.txt
+        env:
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      - name: Collect general topics
+        run: hot-topic --mode general -n 3 --format markdown > general_result.txt
+        env:
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      - name: Send to Telegram
+        run: |
+          set -e
+          MESSAGE=$(cat hot_result.txt; echo ""; echo "---"; echo ""; cat general_result.txt)
+          # Telegram 메시지 길이 제한 4096자 적용
+          MESSAGE="${MESSAGE:0:4096}"
+          curl -s -f -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MESSAGE}" \
+            -d parse_mode=Markdown

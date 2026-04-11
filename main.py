@@ -1,6 +1,7 @@
 """AI/개발자 도구 핫토픽 & 보편 주제 선정 CLI 툴."""
 
 import argparse
+import io
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -29,11 +30,12 @@ SOURCE_ICONS = {
 }
 
 
-def collect_all(fetchers: dict) -> list[dict]:
+def collect_all(fetchers: dict, quiet: bool = False) -> list[dict]:
     """소스에서 병렬로 데이터 수집."""
     all_items = []
+    _console = Console(file=io.StringIO()) if quiet else console
 
-    with console.status("[bold green]데이터 수집 중...") as status:
+    with _console.status("[bold green]데이터 수집 중..."):
         with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
             futures = {
                 executor.submit(fn): name
@@ -46,12 +48,12 @@ def collect_all(fetchers: dict) -> list[dict]:
                     items = future.result()
                     count = len(items)
                     if count > 0:
-                        console.print(f"  [green]OK[/] {name}: {count}개 수집")
+                        _console.print(f"  [green]OK[/] {name}: {count}개 수집")
                     else:
-                        console.print(f"  [yellow]--[/] {name}: 결과 없음")
+                        _console.print(f"  [yellow]--[/] {name}: 결과 없음")
                     all_items.extend(items)
                 except Exception as e:
-                    console.print(f"  [red]ERR[/] {name}: {e}")
+                    _console.print(f"  [red]ERR[/] {name}: {e}")
 
     return all_items
 
@@ -114,6 +116,27 @@ def display_topic(topic: dict, rank: int = 1) -> None:
     console.print(panel)
 
 
+def format_topics_markdown(topics: list[dict], mode_label: str) -> str:
+    """토픽 목록을 Telegram Markdown 형식으로 변환."""
+    emoji = "🔥" if "핫" in mode_label else "💡"
+    lines = [f"{emoji} *{mode_label} TOP {len(topics)}*", ""]
+
+    for i, topic in enumerate(topics, 1):
+        score = topic["score"]
+        lines.append(f"*{i}. {topic['topic']}* (스코어: {score}/100)")
+        for reason in topic["reasons"]:
+            lines.append(f"• {reason}")
+        refs = topic.get("references", [])
+        if refs:
+            ref_links = " | ".join(
+                f"[{ref['title'][:40]}]({ref['url']})" for ref in refs[:3]
+            )
+            lines.append(f"📎 {ref_links}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
 def cli():
     """CLI 진입점."""
     parser = argparse.ArgumentParser(
@@ -136,9 +159,22 @@ def cli():
         action="store_true",
         help="이력 목록 보기",
     )
+    parser.add_argument(
+        "--format",
+        choices=["rich", "markdown"],
+        default="rich",
+        dest="fmt",
+        help="출력 형식: rich (기본) 또는 markdown (CI/Telegram용)",
+    )
     args = parser.parse_args()
 
     load_dotenv()
+
+    markdown_mode = args.fmt == "markdown"
+
+    # markdown 모드에서 --mode 필수 검사
+    if markdown_mode and not args.mode:
+        parser.error("--format markdown 모드에서는 --mode가 필수입니다. (hot 또는 general)")
 
     # 이력 보기 모드
     if args.history:
@@ -170,31 +206,44 @@ def cli():
             choice = "1"
         mode_config = GENERAL_CONFIG if choice == "2" else HOT_CONFIG
 
-    console.print(
-        Panel(mode_config.banner_text, border_style="bright_blue")
-    )
-    console.print()
+    if not markdown_mode:
+        console.print(
+            Panel(mode_config.banner_text, border_style="bright_blue")
+        )
+        console.print()
 
     # 데이터 수집
-    all_items = collect_all(mode_config.fetchers)
+    all_items = collect_all(mode_config.fetchers, quiet=markdown_mode)
 
     if not all_items:
-        console.print("\n[bold red]수집된 데이터가 없습니다.[/]")
-        console.print("네트워크 연결을 확인하거나 API 키를 설정해주세요.\n")
+        if markdown_mode:
+            print("데이터 수집 실패: 수집된 항목이 없습니다.", file=sys.stderr)
+        else:
+            console.print("\n[bold red]수집된 데이터가 없습니다.[/]")
+            console.print("네트워크 연결을 확인하거나 API 키를 설정해주세요.\n")
         sys.exit(1)
 
-    console.print(f"\n[bold]총 {len(all_items)}개 항목 수집 완료. 분석 중...[/]\n")
+    if not markdown_mode:
+        console.print(f"\n[bold]총 {len(all_items)}개 항목 수집 완료. 분석 중...[/]\n")
 
     # 스코어링 (여유분 포함해서 계산 후 필터링)
     topics = score_topics(all_items, top_n=args.count + 10, weights=mode_config.scorer_weights)
     topics = filter_seen(topics)
 
     if not topics:
-        console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
+        if markdown_mode:
+            print("새로운 추천 토픽이 없습니다.", file=sys.stderr)
+        else:
+            console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
     # 요청 수만큼만 출력
     show_topics = topics[:args.count]
+
+    if markdown_mode:
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(format_topics_markdown(show_topics, mode_config.label))
+        return
 
     for i, topic in enumerate(show_topics, 1):
         display_topic(topic, rank=i)
