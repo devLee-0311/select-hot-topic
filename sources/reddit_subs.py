@@ -1,14 +1,16 @@
 """여러 Reddit 서브레딧에서 핫글 수집 (JSON 엔드포인트)."""
 
+import sys
+
 import requests
 
 TIMEOUT = 10
-HEADERS = {"User-Agent": "hot-topic-bot/0.1"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 
 def _fetch_subreddit(subreddit: str, limit: int = 20) -> list[dict]:
     """단일 서브레딧의 핫글을 JSON 엔드포인트로 수집."""
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json"
+    url = f"https://old.reddit.com/r/{subreddit}/hot.json"
 
     try:
         resp = requests.get(
@@ -17,7 +19,7 @@ def _fetch_subreddit(subreddit: str, limit: int = 20) -> list[dict]:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as e:
-        print(f"  [!] Reddit r/{subreddit} 요청 실패: {e}")
+        print(f"  [!] Reddit r/{subreddit} 요청 실패: {e}", file=sys.stderr)
         return []
 
     results = []

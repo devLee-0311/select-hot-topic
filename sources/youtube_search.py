@@ -1,5 +1,7 @@
 """YouTube RSS 피드로 Claude 관련 최신 영상 검색 (API 키 불필요)."""
 
+import sys
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -26,7 +28,7 @@ def _search_youtube(query: str) -> list[dict]:
         )
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"  [!] YouTube 검색 실패 ({query}): {e}")
+        print(f"  [!] YouTube 검색 실패 ({query}): {e}", file=sys.stderr)
         return []
 
     results = []

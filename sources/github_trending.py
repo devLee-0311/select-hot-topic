@@ -1,5 +1,7 @@
 """GitHub Trending 페이지에서 Claude/AI 관련 레포를 스크래핑."""
 
+import sys
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -73,7 +75,7 @@ def fetch_github_trending() -> list[dict]:
         )
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"  [!] GitHub Trending 요청 실패: {e}")
+        print(f"  [!] GitHub Trending 요청 실패: {e}", file=sys.stderr)
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")

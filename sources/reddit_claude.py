@@ -19,7 +19,7 @@ def _fetch_via_praw() -> list[dict] | None:
     try:
         import praw
     except ImportError:
-        print("  [!] praw 미설치 - Reddit JSON 폴백 사용")
+        print("  [!] praw 미설치 - Reddit JSON 폴백 사용", file=sys.stderr)
         return None
 
     try:
@@ -45,21 +45,21 @@ def _fetch_via_praw() -> list[dict] | None:
             })
         return results
     except Exception as e:
-        print(f"  [!] Reddit PRAW 요청 실패: {e}")
+        print(f"  [!] Reddit PRAW 요청 실패: {e}", file=sys.stderr)
         return None
 
 
 def _fetch_via_json() -> list[dict]:
     """Reddit JSON 엔드포인트를 사용하여 핫글 수집 (API 키 불필요)."""
-    url = f"https://www.reddit.com/r/{SUBREDDIT}/hot.json"
-    headers = {"User-Agent": "hot-topic-bot/0.1"}
+    url = f"https://old.reddit.com/r/{SUBREDDIT}/hot.json"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
     try:
         resp = requests.get(url, headers=headers, timeout=TIMEOUT, params={"limit": 20})
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as e:
-        print(f"  [!] Reddit JSON 요청 실패: {e}")
+        print(f"  [!] Reddit JSON 요청 실패: {e}", file=sys.stderr)
         return []
 
     results = []

@@ -116,22 +116,24 @@ def display_topic(topic: dict, rank: int = 1) -> None:
     console.print(panel)
 
 
-def format_topics_markdown(topics: list[dict], mode_label: str) -> str:
-    """토픽 목록을 Telegram Markdown 형식으로 변환."""
+def format_topics_html(topics: list[dict], mode_label: str) -> str:
+    """토픽 목록을 Telegram HTML 형식으로 변환."""
+    NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
     emoji = "🔥" if "핫" in mode_label else "💡"
-    lines = [f"{emoji} *{mode_label} TOP {len(topics)}*", ""]
+    lines = [f"{emoji} <b>{mode_label} TOP {len(topics)}</b>", ""]
 
     for i, topic in enumerate(topics, 1):
         score = topic["score"]
-        lines.append(f"*{i}. {topic['topic']}* (스코어: {score}/100)")
+        num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
+        lines.append(f"{num_emoji} <b>{topic['topic']}</b>")
+        lines.append(f"   📊 스코어: {score}/100")
         for reason in topic["reasons"]:
-            lines.append(f"• {reason}")
+            lines.append(f"   • {reason}")
         refs = topic.get("references", [])
-        if refs:
-            ref_links = " | ".join(
-                f"[{ref['title'][:40]}]({ref['url']})" for ref in refs[:3]
-            )
-            lines.append(f"📎 {ref_links}")
+        for ref in refs[:3]:
+            title = ref["title"][:50]
+            url = ref["url"]
+            lines.append(f"   🔗 <a href=\"{url}\">{title}</a>")
         lines.append("")
 
     return "\n".join(lines).rstrip()
@@ -242,7 +244,7 @@ def cli():
 
     if markdown_mode:
         sys.stdout.reconfigure(encoding="utf-8")
-        print(format_topics_markdown(show_topics, mode_config.label))
+        print(format_topics_html(show_topics, mode_config.label))
         return
 
     for i, topic in enumerate(show_topics, 1):

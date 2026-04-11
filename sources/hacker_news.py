@@ -1,5 +1,7 @@
 """Hacker News Algolia API로 Claude/AI 관련 핫글 검색."""
 
+import sys
+
 import requests
 
 SEARCH_URL = "https://hn.algolia.com/api/v1/search"
@@ -31,7 +33,7 @@ def fetch_hacker_news(queries: list[str] | None = None) -> list[dict]:
             resp.raise_for_status()
             data = resp.json()
         except (requests.RequestException, ValueError) as e:
-            print(f"  [!] Hacker News 요청 실패 ({query}): {e}")
+            print(f"  [!] Hacker News 요청 실패 ({query}): {e}", file=sys.stderr)
             continue
 
         for hit in data.get("hits", []):

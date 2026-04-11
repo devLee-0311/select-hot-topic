@@ -1,5 +1,7 @@
 """Anthropic 공식 릴리즈 노트 스크래핑."""
 
+import sys
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -20,7 +22,7 @@ def fetch_anthropic_releases() -> list[dict]:
         )
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"  [!] Anthropic 릴리즈 노트 요청 실패: {e}")
+        print(f"  [!] Anthropic 릴리즈 노트 요청 실패: {e}", file=sys.stderr)
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")

@@ -1,6 +1,8 @@
 """GeekNews(news.hada.io)에서 Claude/AI 관련 글 수집."""
 
 import re
+import sys
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -34,7 +36,7 @@ def fetch_geeknews(keywords: list[str] | None = None) -> list[dict]:
             )
             resp.raise_for_status()
         except requests.RequestException as e:
-            print(f"  [!] GeekNews 요청 실패 ({page_path}): {e}")
+            print(f"  [!] GeekNews 요청 실패 ({page_path}): {e}", file=sys.stderr)
             continue
 
         soup = BeautifulSoup(resp.text, "html.parser")
