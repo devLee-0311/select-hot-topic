@@ -38,7 +38,7 @@ jobs:
             echo ""
             cat general_result.txt
           } > message.txt
-          MESSAGE=$(head -c 4096 message.txt)
+          MESSAGE=$(cat message.txt)
           RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" \
