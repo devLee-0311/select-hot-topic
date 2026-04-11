@@ -20,7 +20,7 @@ NOISE_WORDS = {
 CONTEXT_NOISE = {"built", "build", "new", "use", "using", "get", "make"}
 
 # 관련 자료 판정: 유사도 임계값 + 최소 공유 키워드 수
-RELATED_THRESHOLD = 0.40
+RELATED_THRESHOLD = 0.30
 MIN_SHARED_KEYWORDS = 2
 
 
