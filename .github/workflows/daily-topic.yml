@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 praw rich python-dotenv
+        run: pip install requests beautifulsoup4 praw rich python-dotenv anthropic
       - name: Collect hot topics
         run: python main.py --mode hot -n 3 --format markdown > hot_result.txt
         env:
@@ -27,6 +27,8 @@ jobs:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       - name: Collect Anthropic official
         run: python main.py --mode anthropic --format markdown > anthropic_result.txt
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - name: Send to Telegram
         run: |
           set -e

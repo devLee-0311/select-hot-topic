@@ -2,6 +2,7 @@
 
 import argparse
 import io
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -161,6 +162,52 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
     return "\n".join(lines).rstrip()
 
 
+def _translate_descriptions(items: list[dict]) -> list[dict]:
+    """Anthropic 글 설명을 한글로 번역 (Haiku 사용)."""
+    try:
+        import anthropic
+    except ImportError:
+        return items
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return items
+
+    # 번역할 description 모아서 한 번에 요청
+    descs = []
+    for item in items:
+        desc = item.get("description", "")
+        if desc and desc != item["title"]:
+            descs.append(desc)
+        else:
+            descs.append(item["title"])
+
+    numbered = "\n".join(f"{i+1}. {d}" for i, d in enumerate(descs))
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": f"아래 영문 설명들을 각각 1줄 한글 요약으로 번역해줘. 번호 형식 유지.\n\n{numbered}",
+            }],
+        )
+        translated = resp.content[0].text.strip().split("\n")
+        for i, line in enumerate(translated):
+            if i < len(items):
+                # "1. 번역된 내용" 형식에서 번호 제거
+                clean = line.strip()
+                for prefix in [f"{i+1}.", f"{i+1})"]:
+                    if clean.startswith(prefix):
+                        clean = clean[len(prefix):].strip()
+                items[i]["description_ko"] = clean
+    except Exception as e:
+        print(f"  [!] 번역 실패: {e}", file=sys.stderr)
+
+    return items
+
+
 def format_anthropic_html() -> str:
     """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환."""
     import html as html_mod
@@ -171,16 +218,23 @@ def format_anthropic_html() -> str:
     if not items:
         return "📢 <b>Anthropic 공식</b>\n\n데이터 없음"
 
+    items = items[:7]
+    items = _translate_descriptions(items)
+
     lines = ["📢 <b>Anthropic 공식</b>", ""]
-    for item in items[:7]:
+    for item in items:
         title = esc(item["title"])
         url = esc(item["url"])
-        desc = item.get("description", "")
         lines.append(f"• <a href=\"{url}\">{title}</a>")
-        if desc and desc != item["title"]:
-            if len(desc) > 120:
-                desc = desc[:117] + "..."
-            lines.append(f"  {esc(desc)}")
+        desc_ko = item.get("description_ko", "")
+        if desc_ko:
+            lines.append(f"  {esc(desc_ko)}")
+        else:
+            desc = item.get("description", "")
+            if desc and desc != item["title"]:
+                if len(desc) > 120:
+                    desc = desc[:117] + "..."
+                lines.append(f"  {esc(desc)}")
 
     return "\n".join(lines)
 
