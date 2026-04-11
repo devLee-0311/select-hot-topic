@@ -114,6 +114,6 @@ def fetch_anthropic_releases() -> list[dict]:
     blog_items = _fetch_page(BLOG_URL, "/blog/", clean_titles=False)
     news_items = _fetch_page(NEWS_URL, "/news/", clean_titles=True)
 
-    # 합쳐서 최대 20개, description 병렬 수집
-    combined = (blog_items + news_items)[:20]
+    # 블로그 최대 10개 + 뉴스 최대 10개, description 병렬 수집
+    combined = blog_items[:10] + news_items[:10]
     return _enrich_descriptions(combined)

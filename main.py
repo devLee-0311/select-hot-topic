@@ -182,7 +182,7 @@ def _translate_descriptions(items: list[dict]) -> list[dict]:
         else:
             descs.append(item["title"])
 
-    numbered = "\n".join(f"{i+1}. {d}" for i, d in enumerate(descs))
+    numbered = "\n".join(f"[{i+1}] {d}" for i, d in enumerate(descs))
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
@@ -190,18 +190,21 @@ def _translate_descriptions(items: list[dict]) -> list[dict]:
             max_tokens=1024,
             messages=[{
                 "role": "user",
-                "content": f"아래 영문 설명들을 각각 1줄 한글 요약으로 번역해줘. 번호 형식 유지.\n\n{numbered}",
+                "content": (
+                    f"아래 영문 설명 {len(descs)}개를 각각 한글 1줄 요약으로 번역해.\n"
+                    f"반드시 [번호] 형식을 유지하고, 각 항목당 정확히 1줄만 출력해.\n\n"
+                    f"{numbered}"
+                ),
             }],
         )
-        translated = resp.content[0].text.strip().split("\n")
-        for i, line in enumerate(translated):
-            if i < len(items):
-                # "1. 번역된 내용" 형식에서 번호 제거
-                clean = line.strip()
-                for prefix in [f"{i+1}.", f"{i+1})"]:
-                    if clean.startswith(prefix):
-                        clean = clean[len(prefix):].strip()
-                items[i]["description_ko"] = clean
+        text = resp.content[0].text.strip()
+        for i in range(len(items)):
+            marker = f"[{i+1}]"
+            for line in text.split("\n"):
+                line = line.strip()
+                if line.startswith(marker):
+                    items[i]["description_ko"] = line[len(marker):].strip()
+                    break
     except Exception as e:
         print(f"  [!] 번역 실패: {e}", file=sys.stderr)
 
@@ -218,7 +221,10 @@ def format_anthropic_html() -> str:
     if not items:
         return "📢 <b>Anthropic 공식</b>\n\n데이터 없음"
 
-    items = items[:7]
+    # 블로그와 뉴스를 분리해서 각각 할당
+    blog = [i for i in items if "claude.com/blog" in i["url"]][:4]
+    news = [i for i in items if "anthropic.com/news" in i["url"]][:3]
+    items = blog + news
     items = _translate_descriptions(items)
 
     lines = ["📢 <b>Anthropic 공식</b>", ""]
