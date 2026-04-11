@@ -1,6 +1,8 @@
 """개별 아이템 기반 토픽 랭킹. 각 아이템이 하나의 토픽, 다른 소스에서 관련 자료를 찾아 첨부."""
 
 import re
+import time
+from datetime import datetime
 from difflib import SequenceMatcher
 
 # 제목 비교 시 무시할 단어
@@ -104,6 +106,25 @@ def score_topics(all_items: list[dict], top_n: int = 5, weights: dict | None = N
     """
     if not all_items:
         return []
+
+    # 최신성 필터: 7일 이상 된 아이템 제거
+    cutoff = time.time() - 7 * 86400
+    filtered_items = []
+    for item in all_items:
+        created = item.get("created") or item.get("created_utc")
+        if created is None:
+            filtered_items.append(item)  # 날짜 정보 없으면 통과
+        elif isinstance(created, (int, float)):
+            if created > cutoff:
+                filtered_items.append(item)
+        elif isinstance(created, str):
+            try:
+                ts = datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp()
+                if ts > cutoff:
+                    filtered_items.append(item)
+            except (ValueError, OSError):
+                filtered_items.append(item)
+    all_items = filtered_items
 
     w = weights or {}
     eng_multiplier = w.get("eng_multiplier", 0.02)

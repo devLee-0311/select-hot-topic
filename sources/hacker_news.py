@@ -1,6 +1,7 @@
 """Hacker News Algolia API로 Claude/AI 관련 핫글 검색."""
 
 import sys
+import time
 
 import requests
 
@@ -25,7 +26,7 @@ def fetch_hacker_news(queries: list[str] | None = None) -> list[dict]:
                 params={
                     "query": query,
                     "tags": "story",
-                    "numericFilters": "points>5",
+                    "numericFilters": f"points>5,created_at_i>{int(time.time()) - 7*86400}",
                     "hitsPerPage": 15,
                 },
                 timeout=TIMEOUT,
