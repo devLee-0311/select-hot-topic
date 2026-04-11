@@ -2,6 +2,7 @@
 
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,6 +34,35 @@ def _clean_title(raw: str) -> str:
         if title.startswith(label):
             title = title[len(label):].strip()
     return title
+
+
+def _fetch_meta_description(url: str) -> str:
+    """개별 글 페이지에서 og:description 추출."""
+    try:
+        resp = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        og = soup.find("meta", attrs={"property": "og:description"})
+        if og:
+            return og.get("content", "").strip()
+        meta = soup.find("meta", attrs={"name": "description"})
+        if meta:
+            return meta.get("content", "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _enrich_descriptions(items: list[dict]) -> list[dict]:
+    """각 글의 og:description을 병렬로 가져와서 description 필드 채움."""
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_fetch_meta_description, item["url"]): i for i, item in enumerate(items)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            desc = future.result()
+            if desc:
+                items[idx]["description"] = desc
+    return items
 
 
 def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[dict]:
@@ -84,6 +114,6 @@ def fetch_anthropic_releases() -> list[dict]:
     blog_items = _fetch_page(BLOG_URL, "/blog/", clean_titles=False)
     news_items = _fetch_page(NEWS_URL, "/news/", clean_titles=True)
 
-    # 합쳐서 최대 20개
-    combined = blog_items + news_items
-    return combined[:20]
+    # 합쳐서 최대 20개, description 병렬 수집
+    combined = (blog_items + news_items)[:20]
+    return _enrich_descriptions(combined)

@@ -175,7 +175,12 @@ def format_anthropic_html() -> str:
     for item in items[:7]:
         title = esc(item["title"])
         url = esc(item["url"])
+        desc = item.get("description", "")
         lines.append(f"• <a href=\"{url}\">{title}</a>")
+        if desc and desc != item["title"]:
+            if len(desc) > 120:
+                desc = desc[:117] + "..."
+            lines.append(f"  {esc(desc)}")
 
     return "\n".join(lines)
 
