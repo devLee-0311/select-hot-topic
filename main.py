@@ -118,6 +118,8 @@ def display_topic(topic: dict, rank: int = 1) -> None:
 
 def format_topics_html(topics: list[dict], mode_label: str) -> str:
     """토픽 목록을 Telegram HTML 형식으로 변환."""
+    import html as html_mod
+    esc = html_mod.escape
     NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
     emoji = "🔥" if "핫" in mode_label else "💡"
     lines = [f"{emoji} <b>{mode_label} TOP {len(topics)}</b>", ""]
@@ -125,7 +127,7 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
     for i, topic in enumerate(topics, 1):
         score = topic["score"]
         num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
-        lines.append(f"{num_emoji} <b>{topic['topic']}</b>")
+        lines.append(f"{num_emoji} <b>{esc(topic['topic'])}</b>")
         if score >= 90:
             grade = "🔴 필수 다루기"
         elif score >= 70:
@@ -139,7 +141,7 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
         if desc and desc != topic["topic"]:
             if len(desc) > 100:
                 desc = desc[:97] + "..."
-            lines.append(f"   📝 {desc}")
+            lines.append(f"   📝 {esc(desc)}")
         else:
             # description이 없으면 첫 번째 레퍼런스의 도메인으로 출처 표시
             refs = topic.get("references", [])
@@ -148,11 +150,11 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
                 domain = urlparse(refs[0]["url"]).netloc.replace("www.", "")
                 lines.append(f"   📝 via {domain}")
         for reason in topic["reasons"]:
-            lines.append(f"   • {reason}")
+            lines.append(f"   • {esc(reason)}")
         refs = topic.get("references", [])
         for ref in refs[:3]:
-            title = ref["title"][:50]
-            url = ref["url"]
+            title = esc(ref["title"][:50])
+            url = esc(ref["url"])
             lines.append(f"   🔗 <a href=\"{url}\">{title}</a>")
         lines.append("")
 
