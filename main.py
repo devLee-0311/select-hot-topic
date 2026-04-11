@@ -161,6 +161,25 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
     return "\n".join(lines).rstrip()
 
 
+def format_anthropic_html() -> str:
+    """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환."""
+    import html as html_mod
+    esc = html_mod.escape
+    from sources.anthropic_releases import fetch_anthropic_releases
+
+    items = fetch_anthropic_releases()
+    if not items:
+        return "📢 <b>Anthropic 공식</b>\n\n데이터 없음"
+
+    lines = ["📢 <b>Anthropic 공식</b>", ""]
+    for item in items[:7]:
+        title = esc(item["title"])
+        url = esc(item["url"])
+        lines.append(f"• <a href=\"{url}\">{title}</a>")
+
+    return "\n".join(lines)
+
+
 def cli():
     """CLI 진입점."""
     parser = argparse.ArgumentParser(
@@ -174,9 +193,9 @@ def cli():
     )
     parser.add_argument(
         "--mode", "-m",
-        choices=["hot", "general"],
+        choices=["hot", "general", "anthropic"],
         default=None,
-        help="모드 선택: hot (핫토픽) 또는 general (보편 주제). 미지정시 대화형 선택.",
+        help="모드 선택: hot (핫토픽), general (보편 주제), anthropic (공식 콘텐츠). 미지정시 대화형 선택.",
     )
     parser.add_argument(
         "--history",
@@ -198,7 +217,16 @@ def cli():
 
     # markdown 모드에서 --mode 필수 검사
     if markdown_mode and not args.mode:
-        parser.error("--format markdown 모드에서는 --mode가 필수입니다. (hot 또는 general)")
+        parser.error("--format markdown 모드에서는 --mode가 필수입니다. (hot, general, anthropic)")
+
+    # anthropic 모드: 공식 콘텐츠만 출력
+    if args.mode == "anthropic":
+        if markdown_mode:
+            sys.stdout.reconfigure(encoding="utf-8")
+            print(format_anthropic_html())
+        else:
+            console.print(format_anthropic_html())
+        return
 
     # 이력 보기 모드
     if args.history:

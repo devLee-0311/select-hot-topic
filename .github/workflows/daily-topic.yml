@@ -25,6 +25,8 @@ jobs:
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      - name: Collect Anthropic official
+        run: python main.py --mode anthropic --format markdown > anthropic_result.txt
       - name: Send to Telegram
         run: |
           set -e
@@ -37,6 +39,10 @@ jobs:
             echo "━━━━━━━━━━━━━━━"
             echo ""
             cat general_result.txt
+            echo ""
+            echo "━━━━━━━━━━━━━━━"
+            echo ""
+            cat anthropic_result.txt
           } > message.txt
           MESSAGE=$(cat message.txt)
           RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \

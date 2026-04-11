@@ -49,7 +49,6 @@ HOT_CONFIG = ModeConfig(
         "Hacker News": fetch_hacker_news,
         "YouTube": fetch_youtube_search,
         "GeekNews": fetch_geeknews,
-        "Anthropic Releases": fetch_anthropic_releases,
     },
     scorer_weights={
         "eng_multiplier": 0.008,

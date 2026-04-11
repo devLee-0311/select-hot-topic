@@ -1,62 +1,89 @@
-"""Anthropic 공식 릴리즈 노트 스크래핑."""
+"""Anthropic 공식 블로그 + 뉴스 수집."""
 
+import re
 import sys
 
 import requests
 from bs4 import BeautifulSoup
 
-RELEASE_NOTES_URL = "https://docs.anthropic.com/en/release-notes/overview"
+BLOG_URL = "https://claude.com/blog"
+NEWS_URL = "https://www.anthropic.com/news"
 TIMEOUT = 10
+BASE_ENGAGEMENT = 1500  # 공식 소스 기본 가산점
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# 제목에서 날짜·카테고리 prefix 제거 (예: "Apr 6, 2026AnnouncementsActual Title")
+DATE_CATEGORY_RE = re.compile(
+    r"^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}"
+    r"(?:Announcements|Policy|Research|Product|Safety)?"
+)
+
+CATEGORY_LABELS = {"Announcements", "Policy", "Research", "Product", "Safety", "Engineering"}
 
 
-def fetch_anthropic_releases() -> list[dict]:
-    """Anthropic 릴리즈 노트에서 최신 항목을 파싱."""
+def _clean_title(raw: str) -> str:
+    """날짜·카테고리 prefix를 제거한 제목 반환."""
+    title = DATE_CATEGORY_RE.sub("", raw).strip()
+    # 남은 카테고리 라벨 제거
+    for label in CATEGORY_LABELS:
+        if title.startswith(label):
+            title = title[len(label):].strip()
+    return title
+
+
+def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[dict]:
+    """단일 페이지에서 글 목록 수집."""
     try:
-        resp = requests.get(
-            RELEASE_NOTES_URL,
-            timeout=TIMEOUT,
-            headers={
-                "User-Agent": "Mozilla/5.0 (compatible; hot-topic-bot/0.1)",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
+        resp = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"  [!] Anthropic 릴리즈 노트 요청 실패: {e}", file=sys.stderr)
+        print(f"  [!] Anthropic 페이지 요청 실패 ({url}): {e}", file=sys.stderr)
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
     results = []
+    seen = set()
 
-    # 릴리즈 노트 항목 파싱 - 구조에 따라 선택자 조정 필요
-    # 일반적으로 h2/h3 헤더 + 날짜 + 내용 구조
-    for heading in soup.select("h2, h3"):
-        title = heading.get_text(strip=True)
-        if not title:
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        if path_prefix not in href or href.rstrip("/") == path_prefix.rstrip("/"):
+            continue
+        if "/category/" in href or href in seen:
             continue
 
-        # 헤더 다음 형제 요소에서 설명 추출
-        desc_parts = []
-        sibling = heading.find_next_sibling()
-        while sibling and sibling.name not in ("h2", "h3"):
-            text = sibling.get_text(strip=True)
-            if text:
-                desc_parts.append(text)
-            sibling = sibling.find_next_sibling()
+        heading = a_tag.find(["h2", "h3", "h4"])
+        raw_title = heading.get_text(strip=True) if heading else a_tag.get_text(strip=True)
 
-        description = " ".join(desc_parts)[:300]
+        if not raw_title or len(raw_title) < 10 or raw_title == "Read more":
+            continue
 
-        # 앵커 링크 생성
-        anchor = heading.get("id", "")
-        url = f"{RELEASE_NOTES_URL}#{anchor}" if anchor else RELEASE_NOTES_URL
+        title = _clean_title(raw_title) if clean_titles else raw_title
+        if not title or len(title) < 10:
+            continue
+
+        seen.add(href)
+        full_url = href if href.startswith("http") else f"https://{'claude.com' if 'blog' in path_prefix else 'www.anthropic.com'}{href}"
 
         results.append({
             "source": "anthropic_releases",
             "title": title,
-            "url": url,
-            "description": description,
-            "engagement": 0,  # 릴리즈 노트는 engagement 없음
+            "url": full_url,
+            "description": title,
+            "engagement": BASE_ENGAGEMENT,
         })
 
-    # 최근 10개만 반환
-    return results[:10]
+    return results[:15]
+
+
+def fetch_anthropic_releases() -> list[dict]:
+    """Anthropic 공식 블로그 + 뉴스에서 최신 글 수집."""
+    blog_items = _fetch_page(BLOG_URL, "/blog/", clean_titles=False)
+    news_items = _fetch_page(NEWS_URL, "/news/", clean_titles=True)
+
+    # 합쳐서 최대 20개
+    combined = blog_items + news_items
+    return combined[:20]
