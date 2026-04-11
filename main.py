@@ -126,12 +126,27 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
         score = topic["score"]
         num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
         lines.append(f"{num_emoji} <b>{topic['topic']}</b>")
-        lines.append(f"   📊 스코어: {score}/100")
+        if score >= 90:
+            grade = "🔴 필수 다루기"
+        elif score >= 70:
+            grade = "🟠 강력 추천"
+        elif score >= 50:
+            grade = "🟡 고려 대상"
+        else:
+            grade = "⚪ 참고용"
+        lines.append(f"   📊 {score}/100 — {grade}")
         desc = topic.get("description", "")
         if desc and desc != topic["topic"]:
             if len(desc) > 100:
                 desc = desc[:97] + "..."
             lines.append(f"   📝 {desc}")
+        else:
+            # description이 없으면 첫 번째 레퍼런스의 도메인으로 출처 표시
+            refs = topic.get("references", [])
+            if refs:
+                from urllib.parse import urlparse
+                domain = urlparse(refs[0]["url"]).netloc.replace("www.", "")
+                lines.append(f"   📝 via {domain}")
         for reason in topic["reasons"]:
             lines.append(f"   • {reason}")
         refs = topic.get("references", [])
