@@ -14,14 +14,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install .
+        run: pip install requests beautifulsoup4 praw rich python-dotenv
       - name: Collect hot topics
-        run: hot-topic --mode hot -n 3 --format markdown > hot_result.txt
+        run: python main.py --mode hot -n 3 --format markdown > hot_result.txt
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       - name: Collect general topics
-        run: hot-topic --mode general -n 3 --format markdown > general_result.txt
+        run: python main.py --mode general -n 3 --format markdown > general_result.txt
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
