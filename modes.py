@@ -52,12 +52,12 @@ HOT_CONFIG = ModeConfig(
         "Anthropic Releases": fetch_anthropic_releases,
     },
     scorer_weights={
-        "eng_multiplier": 0.005,
-        "eng_cap": 25,
-        "cross_bonus": 10,
-        "related_multiplier": 0.005,
-        "related_cap": 10,
-        "base_score": 15,
+        "eng_multiplier": 0.008,
+        "eng_cap": 30,
+        "cross_bonus": 12,
+        "related_multiplier": 0.008,
+        "related_cap": 12,
+        "base_score": 20,
     },
 )
 
@@ -117,12 +117,12 @@ GENERAL_CONFIG = ModeConfig(
         "GeekNews": partial(fetch_geeknews, keywords=GENERAL_KEYWORDS_GN),
     },
     scorer_weights={
-        "eng_multiplier": 0.008,
-        "eng_cap": 25,
-        "cross_bonus": 10,
-        "related_multiplier": 0.005,
-        "related_cap": 10,
-        "base_score": 15,
+        "eng_multiplier": 0.01,
+        "eng_cap": 30,
+        "cross_bonus": 12,
+        "related_multiplier": 0.008,
+        "related_cap": 12,
+        "base_score": 20,
     },
 )
 
