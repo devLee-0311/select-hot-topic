@@ -10,10 +10,12 @@ from sources import (
     fetch_hacker_news,
     fetch_reddit_claude,
     fetch_reddit_eli5,
+    fetch_reddit_eli5_filtered,
     fetch_reddit_localllama,
     fetch_reddit_openai,
     fetch_reddit_programming,
     fetch_reddit_technology,
+    fetch_reddit_technology_filtered,
     fetch_youtube_search,
 )
 
@@ -65,23 +67,37 @@ HOT_CONFIG = ModeConfig(
 # ---------------------------------------------------------------------------
 
 GENERAL_QUERIES_YT = [
-    "AI 쉽게 설명", "기술 상식", "IT 용어 정리",
-    "tech explained", "technology for beginners",
-    "what is AI", "AI vs ML difference",
-    "tech controversy", "tech news everyone should know",
+    "AI 쉽게 설명", "IT 용어 정리", "AI for beginners",
+    "what is AI", "AI vs ML difference", "how LLM works",
+    "tech controversy AI", "AI news 2026",
+    "cybersecurity explained", "cloud computing explained",
 ]
 
 GENERAL_QUERIES_HN = [
-    "technology explained", "AI explained",
-    "internet privacy", "cybersecurity basics",
-    "cloud computing", "tech trends",
-    "AI controversy", "tech regulation",
+    "AI explained", "machine learning",
+    "internet privacy", "cybersecurity",
+    "cloud computing", "software engineering",
+    "AI regulation", "tech antitrust",
+    "open source", "programming language",
 ]
 
 GENERAL_KEYWORDS_GN = [
     "ai", "인공지능", "기술", "보안", "프라이버시", "클라우드",
     "스마트폰", "앱", "테크", "it", "디지털", "자동화",
     "로봇", "사이버", "해킹", "개인정보",
+]
+
+GENERAL_KEYWORDS_REDDIT = [
+    "ai", "artificial intelligence", "machine learning", "llm", "gpt",
+    "openai", "google", "apple", "microsoft", "meta", "amazon",
+    "claude", "anthropic", "chatbot", "algorithm", "data",
+    "privacy", "cybersecurity", "hack", "encryption", "vpn",
+    "cloud", "saas", "api", "software", "app", "browser",
+    "internet", "wifi", "5g", "smartphone", "chip", "semiconductor",
+    "robot", "automation", "self-driving",
+    "blockchain", "crypto", "quantum",
+    "computer", "cpu", "gpu", "server", "linux", "windows",
+    "open source", "programming", "developer", "coding",
 ]
 
 GENERAL_CONFIG = ModeConfig(
@@ -92,8 +108,8 @@ GENERAL_CONFIG = ModeConfig(
         "비개발자도 궁금할 만한 기술/AI 상식 주제를 추천합니다."
     ),
     fetchers={
-        "Reddit r/technology": fetch_reddit_technology,
-        "Reddit r/ELI5": fetch_reddit_eli5,
+        "Reddit r/technology": partial(fetch_reddit_technology_filtered, keywords=GENERAL_KEYWORDS_REDDIT),
+        "Reddit r/ELI5": partial(fetch_reddit_eli5_filtered, keywords=GENERAL_KEYWORDS_REDDIT),
         "Reddit r/ClaudeAI": fetch_reddit_claude,
         "Reddit r/OpenAI": fetch_reddit_openai,
         "YouTube": partial(fetch_youtube_search, queries=GENERAL_QUERIES_YT),
