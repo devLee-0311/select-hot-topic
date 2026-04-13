@@ -1,18 +1,22 @@
 """AI/개발자 도구 핫토픽 & 보편 주제 선정 CLI 툴."""
 
 import argparse
+import html as html_mod
 import io
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from math import ceil
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
 from history import get_used_urls, save_topic
-from modes import HOT_CONFIG, GENERAL_CONFIG, MODES, ModeConfig
-from scorer import score_topics
+from modes import HOT_CONFIG, GENERAL_CONFIG, MODES
+from pipeline import run_pipeline, adapt_for_filter_seen
 
 console = Console()
 
@@ -27,7 +31,6 @@ SOURCE_ICONS = {
     "hacker_news": "[bold yellow]HN[/]",
     "youtube": "[bold red]YouTube[/]",
     "geeknews": "[bold green]GeekNews[/]",
-    "anthropic_releases": "[bold magenta]Anthropic[/]",
 }
 
 
@@ -119,7 +122,6 @@ def display_topic(topic: dict, rank: int = 1) -> None:
 
 def format_topics_html(topics: list[dict], mode_label: str) -> str:
     """토픽 목록을 Telegram HTML 형식으로 변환."""
-    import html as html_mod
     esc = html_mod.escape
     NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
     emoji = "🔥" if "핫" in mode_label else "💡"
@@ -147,7 +149,6 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
             # description이 없으면 첫 번째 레퍼런스의 도메인으로 출처 표시
             refs = topic.get("references", [])
             if refs:
-                from urllib.parse import urlparse
                 domain = urlparse(refs[0]["url"]).netloc.replace("www.", "")
                 lines.append(f"   📝 via {domain}")
         for reason in topic["reasons"]:
@@ -160,6 +161,68 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip()
+
+
+def format_pipeline_html(result: dict, mode_label: str) -> str:
+    """run_pipeline() 결과를 Telegram HTML 형식으로 변환 (hot + evergreen 2섹션)."""
+    esc = html_mod.escape
+    NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+
+    def render_items(items: list[dict], header: str) -> list[str]:
+        lines = [header, ""]
+        if not items:
+            lines.append("(없음)")
+            lines.append("")
+            return lines
+        for i, item in enumerate(items, 1):
+            num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
+            title = esc(item.get("title", ""))
+            url = esc(item.get("url", ""))
+            lines.append(f"{num_emoji} <a href=\"{url}\">{title}</a>")
+
+            final_score = item.get("final_score", 0)
+            display_score = min(100, int(final_score / 6.0 * 100))
+            score_line = f"   📊 {display_score}/100"
+
+            tier = item.get("matched_tier", "")
+            if tier in ("tier1", "tier2"):
+                tier_num = tier.replace("tier", "")
+                score_line += f"  🎯 tier{tier_num}"
+
+            cross = item.get("cross_source_count", 1)
+            if cross >= 2:
+                score_line += f"  🔗 {cross} 소스"
+
+            lines.append(score_line)
+
+            desc = item.get("description", "")
+            if desc and desc != item.get("title", ""):
+                if len(desc) > 100:
+                    desc = desc[:97] + "..."
+                lines.append(f"   📝 {esc(desc)}")
+
+            source = item.get("source", "")
+            source_label = SOURCE_ICONS.get(source, source)
+            # SOURCE_ICONS values contain rich markup; strip for HTML output
+            plain_source = re.sub(r"\[.*?\]", "", source_label).strip()
+            if plain_source:
+                lines.append(f"   {esc(plain_source)}")
+
+            lines.append("")
+        return lines
+
+    hot_items = result.get("hot", [])
+    ever_items = result.get("evergreen", [])
+
+    lines: list[str] = []
+    lines += render_items(hot_items, f"🔥 <b>{mode_label} — HOT</b>")
+    lines += render_items(ever_items, f"💡 <b>{mode_label} — EVERGREEN</b>")
+
+    text = "\n".join(lines).rstrip()
+    # Trim to 3500 char budget
+    if len(text) > 3500:
+        text = text[:3497] + "..."
+    return text
 
 
 def _translate_descriptions(items: list[dict]) -> list[dict]:
@@ -361,37 +424,85 @@ def cli():
     if not markdown_mode:
         console.print(f"\n[bold]총 {len(all_items)}개 항목 수집 완료. 분석 중...[/]\n")
 
-    # 스코어링 (여유분 포함해서 계산 후 필터링)
-    topics = score_topics(all_items, top_n=args.count + 10, weights=mode_config.scorer_weights)
-    topics = filter_seen(topics)
+    # 파이프라인 설정 (args.count 기반으로 hot/evergreen 개수 조정)
+    pipeline_cfg = dict(mode_config.pipeline_config)
+    if args.count <= 1:
+        hot_count = 1
+        evergreen_count = 0
+    else:
+        hot_count = max(1, ceil(args.count * 0.6))
+        evergreen_count = args.count - hot_count
+    pipeline_cfg["hot_count"] = hot_count
+    pipeline_cfg["evergreen_count"] = evergreen_count
 
-    if not topics:
+    pipeline_result = run_pipeline(all_items, pipeline_cfg)
+
+    # filter_seen 적용
+    all_topics_flat = pipeline_result["hot"] + pipeline_result["evergreen"]
+    wrapped = adapt_for_filter_seen(all_topics_flat)
+
+    # content_type 메타데이터를 wrapped에 전달 (split 복원용)
+    for i, item in enumerate(all_topics_flat):
+        wrapped[i]["_content_type"] = item.get("content_type", "hot")
+        wrapped[i]["_pipeline_item"] = item
+
+    wrapped = filter_seen(wrapped)
+
+    if not wrapped:
         if markdown_mode:
             print("새로운 추천 토픽이 없습니다.", file=sys.stderr)
         else:
             console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
-    # 점수 높은 순 정렬 후 요청 수만큼만 출력
-    topics.sort(key=lambda t: t["score"], reverse=True)
-    show_topics = topics[:args.count]
+    # hot/evergreen 재분리
+    seen_hot = [w["_pipeline_item"] for w in wrapped if w.get("_content_type") == "hot"][:hot_count]
+    seen_ever = [w["_pipeline_item"] for w in wrapped if w.get("_content_type") == "evergreen"][:evergreen_count]
+    display_result = {"hot": seen_hot, "evergreen": seen_ever}
 
     if markdown_mode:
         sys.stdout.reconfigure(encoding="utf-8")
-        print(format_topics_html(show_topics, mode_config.label))
+        print(format_pipeline_html(display_result, mode_config.label))
         return
 
-    for i, topic in enumerate(show_topics, 1):
-        display_topic(topic, rank=i)
+    # rich CLI 출력
+    all_display = seen_hot + seen_ever
+    for i, item in enumerate(all_display, 1):
+        ctype = item.get("content_type", "hot")
+        badge = "[🔥 HOT]" if ctype == "hot" else "[💡 EVERGREEN]"
+        # wrap as legacy topic shape for display_topic
+        raw_eng = item.get("engagement", 0)
+        source = item.get("source", "")
+        score = min(100, int(item.get("final_score", 0) / 6.0 * 100))
+        reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
+        cross = item.get("cross_source_count", 1)
+        if cross >= 2:
+            reasons.append(f"교차 소스 {cross}곳 언급")
+        tier = item.get("matched_tier", "")
+        if tier:
+            reasons.append(tier)
+        legacy_topic = {
+            "topic": f"{badge} {item.get('title', '')}"[:80],
+            "description": item.get("description", ""),
+            "score": score,
+            "reasons": reasons,
+            "references": [{
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "source": source,
+                "engagement": raw_eng,
+            }],
+        }
+        display_topic(legacy_topic, rank=i)
 
     # 이력 저장 확인
     console.print()
     try:
         answer = console.input("[bold cyan]이력에 저장하시겠습니까? (y/n): [/]")
         if answer.strip().lower() in ("y", "yes", "ㅇ", "ㅇㅇ"):
-            for topic in show_topics:
-                save_topic(topic, mode=mode_config.name)
-            console.print(f"[green]✓ {len(show_topics)}개 토픽이 이력에 저장되었습니다.[/]")
+            for w in wrapped:
+                save_topic(w, mode=mode_config.name)
+            console.print(f"[green]✓ {len(wrapped)}개 토픽이 이력에 저장되었습니다.[/]")
         else:
             console.print("[yellow]이력에 저장하지 않았습니다.[/]")
     except EOFError:

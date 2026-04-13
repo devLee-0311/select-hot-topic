@@ -4,17 +4,14 @@ from dataclasses import dataclass, field
 from functools import partial
 
 from sources import (
-    fetch_anthropic_releases,
     fetch_geeknews,
     fetch_github_trending,
     fetch_hacker_news,
     fetch_reddit_claude,
-    fetch_reddit_eli5,
     fetch_reddit_eli5_filtered,
     fetch_reddit_localllama,
     fetch_reddit_openai,
     fetch_reddit_programming,
-    fetch_reddit_technology,
     fetch_reddit_technology_filtered,
     fetch_youtube_search,
 )
@@ -27,6 +24,7 @@ class ModeConfig:
     banner_text: str
     fetchers: dict = field(default_factory=dict)
     scorer_weights: dict = field(default_factory=dict)
+    pipeline_config: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +55,11 @@ HOT_CONFIG = ModeConfig(
         "related_multiplier": 0.008,
         "related_cap": 12,
         "base_score": 20,
+    },
+    pipeline_config={
+        "skip_tiering": False,
+        "hot_count": 3,
+        "evergreen_count": 2,
     },
 )
 
@@ -122,6 +125,11 @@ GENERAL_CONFIG = ModeConfig(
         "related_multiplier": 0.008,
         "related_cap": 12,
         "base_score": 20,
+    },
+    pipeline_config={
+        "skip_tiering": True,
+        "hot_count": 3,
+        "evergreen_count": 2,
     },
 )
 
