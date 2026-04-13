@@ -431,6 +431,33 @@ def run_pipeline(items: list[dict], config: dict | None = None) -> dict:
             else:
                 hot_top.append(best_tier1)
 
+    # Attach cluster_refs to each hot/evergreen item
+    cluster_map: dict[int, list[dict]] = defaultdict(list)
+    for it in items:
+        cid = it.get("cluster_id")
+        if cid is not None:
+            cluster_map[cid].append(it)
+
+    for it in hot_top + ever_top:
+        cid = it.get("cluster_id")
+        if cid is not None and len(cluster_map[cid]) >= 2:
+            others = [
+                m for m in cluster_map[cid]
+                if m is not it
+            ]
+            others.sort(key=lambda m: _get_raw_engagement(m), reverse=True)
+            it["cluster_refs"] = [
+                {
+                    "title": m.get("title", ""),
+                    "url": m.get("url", ""),
+                    "source": m.get("source", ""),
+                    "engagement": _get_raw_engagement(m),
+                }
+                for m in others[:4]
+            ]
+        else:
+            it["cluster_refs"] = []
+
     return {
         "hot": hot_top,
         "evergreen": ever_top,

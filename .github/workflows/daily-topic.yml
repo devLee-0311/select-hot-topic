@@ -16,12 +16,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 praw rich python-dotenv anthropic
       - name: Collect hot topics
-        run: python main.py --mode hot -n 3 --format markdown > hot_result.txt
-        env:
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-      - name: Collect general topics
-        run: python main.py --mode general -n 3 --format markdown > general_result.txt
+        run: python main.py --mode hot --hot-n 4 --evergreen-n 4 --format markdown > hot_result.txt
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
@@ -41,10 +36,6 @@ jobs:
             echo "📅 <b>${DATE}</b>"
             echo ""
             cat hot_result.txt
-            echo ""
-            echo "━━━━━━━━━━━━━━━"
-            echo ""
-            cat general_result.txt
             echo ""
             echo "━━━━━━━━━━━━━━━"
             echo ""

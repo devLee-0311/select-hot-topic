@@ -58,8 +58,8 @@ HOT_CONFIG = ModeConfig(
     },
     pipeline_config={
         "skip_tiering": False,
-        "hot_count": 3,
-        "evergreen_count": 2,
+        "hot_count": 4,
+        "evergreen_count": 4,
     },
 )
 

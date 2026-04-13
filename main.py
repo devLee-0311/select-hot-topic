@@ -208,6 +208,13 @@ def format_pipeline_html(result: dict, mode_label: str) -> str:
             if plain_source:
                 lines.append(f"   {esc(plain_source)}")
 
+            cluster_refs = item.get("cluster_refs", [])
+            for ref in cluster_refs[:3]:
+                ref_title = esc(ref.get("title", "")[:60])
+                ref_url = esc(ref.get("url", ""))
+                ref_source = esc(ref.get("source", ""))
+                lines.append(f"   🔗 <a href=\"{ref_url}\">{ref_source}: {ref_title}</a>")
+
             lines.append("")
         return lines
 
@@ -332,6 +339,20 @@ def cli():
         help="추천할 토픽 수 (기본: 1)",
     )
     parser.add_argument(
+        "--hot-n",
+        type=int,
+        default=None,
+        dest="hot_n",
+        help="HOT 섹션 항목 수 (지정 시 --count 비례 분할 무시)",
+    )
+    parser.add_argument(
+        "--evergreen-n",
+        type=int,
+        default=None,
+        dest="evergreen_n",
+        help="EVERGREEN 섹션 항목 수 (지정 시 --count 비례 분할 무시)",
+    )
+    parser.add_argument(
         "--mode", "-m",
         choices=["hot", "general", "anthropic"],
         default=None,
@@ -424,9 +445,12 @@ def cli():
     if not markdown_mode:
         console.print(f"\n[bold]총 {len(all_items)}개 항목 수집 완료. 분석 중...[/]\n")
 
-    # 파이프라인 설정 (args.count 기반으로 hot/evergreen 개수 조정)
+    # 파이프라인 설정 (hot/evergreen 개수 결정)
     pipeline_cfg = dict(mode_config.pipeline_config)
-    if args.count <= 1:
+    if args.hot_n is not None or args.evergreen_n is not None:
+        hot_count = args.hot_n if args.hot_n is not None else 3
+        evergreen_count = args.evergreen_n if args.evergreen_n is not None else 2
+    elif args.count <= 1:
         hot_count = 1
         evergreen_count = 0
     else:
