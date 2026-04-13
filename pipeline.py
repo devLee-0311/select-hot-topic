@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from utils import similarity
+from utils import clean_for_compare, similarity
 
 # ── 키워드 티어 ──────────────────────────────────────────────
 
@@ -57,6 +57,9 @@ TIER_WEIGHTS = {"tier1": 1.5, "tier2": 1.0, "tier3": 0.6}
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
 SIMILARITY_THRESHOLD = 0.4
+
+CLUSTER_SIMILARITY_THRESHOLD = 0.55
+CLUSTER_MIN_SHARED_KEYWORDS = 2
 
 HOT_SIGNAL_KEYWORDS = [
     "release", "launch", "announce", "breaking",
@@ -176,38 +179,61 @@ def tag_tiers(items: list[dict], skip_tiering: bool = False) -> list[dict]:
     return result
 
 
+def _titles_cluster(a: str, b: str) -> bool:
+    """두 제목이 클러스터링 기준을 충족하는지 판정.
+
+    CLUSTER_MIN_SHARED_KEYWORDS 이상의 공유 단어 AND
+    similarity >= CLUSTER_SIMILARITY_THRESHOLD 를 모두 만족해야 True.
+    """
+    ca, cb = clean_for_compare(a), clean_for_compare(b)
+    if not ca or not cb:
+        return False
+    words_a = set(ca.split())
+    words_b = set(cb.split())
+    if len(words_a & words_b) < CLUSTER_MIN_SHARED_KEYWORDS:
+        return False
+    return similarity(a, b) >= CLUSTER_SIMILARITY_THRESHOLD
+
+
 def detect_clusters(items: list[dict]) -> tuple[list[dict], list[dict]]:
-    """아이템을 클러스터링. URL 부분 문자열 또는 제목 유사도 >= 0.4 기준."""
+    """아이템을 클러스터링. URL 부분 문자열 또는 제목 유사도 기준.
+
+    전이적 유니온-파인드 대신 pairwise-strict 그리디 방식 사용:
+    새 아이템은 기존 클러스터의 모든 멤버와 유사해야 병합.
+    """
     n = len(items)
-    parent = list(range(n))
+    # cluster_of[i] = 클러스터 인덱스 (None이면 미배정)
+    cluster_of: list[int | None] = [None] * n
+    # clusters_members[c] = 해당 클러스터에 속한 아이템 인덱스 목록
+    clusters_members: list[list[int]] = []
 
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
+    def _url_linked(i: int, j: int) -> bool:
+        url_i = items[i].get("url", "")
+        url_j = items[j].get("url", "")
+        return bool(url_i and url_j and (url_i in url_j or url_j in url_i))
 
-    def union(a: int, b: int) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
+    def _pair_linked(i: int, j: int) -> bool:
+        if _url_linked(i, j):
+            return True
+        return _titles_cluster(items[i].get("title", ""), items[j].get("title", ""))
 
     for i in range(n):
-        for j in range(i + 1, n):
-            url_i = items[i].get("url", "")
-            url_j = items[j].get("url", "")
-            linked = False
-            if url_i and url_j and (url_i in url_j or url_j in url_i):
-                linked = True
-            if not linked and similarity(items[i].get("title", ""), items[j].get("title", "")) >= SIMILARITY_THRESHOLD:
-                linked = True
-            if linked:
-                union(i, j)
+        merged = False
+        for c_idx, members in enumerate(clusters_members):
+            # 새 아이템이 클러스터의 모든 기존 멤버와 연결되어야 병합
+            if all(_pair_linked(i, m) for m in members):
+                members.append(i)
+                cluster_of[i] = c_idx
+                merged = True
+                break
+        if not merged:
+            cluster_of[i] = len(clusters_members)
+            clusters_members.append([i])
 
     # 클러스터 그룹핑
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(n):
-        groups[find(i)].append(i)
+        groups[cluster_of[i]].append(i)
 
     cluster_id_counter = 0
     clusters: list[dict] = []
