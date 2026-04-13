@@ -53,6 +53,11 @@ SOURCE_FAMILY = {
     "anthropic_releases": "anthropic",
 }
 
+# Sources that can contribute to cross_source_count and refs, but cannot be anchor items.
+# Rationale: YouTube competes directly with user's own YouTube content; GeekNews is a
+# Korean aggregator so its topics are already derivative of other sources we fetch.
+NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
+
 TIER_WEIGHTS = {"tier1": 1.5, "tier2": 1.0, "tier3": 0.6}
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
@@ -441,17 +446,23 @@ def run_pipeline(items: list[dict], config: dict | None = None) -> dict:
     # 점수 내림차순 정렬
     items.sort(key=lambda x: x.get("final_score", 0), reverse=True)
 
-    # hot / evergreen 분리
-    hot_items = [it for it in items if it.get("content_type") == "hot"]
-    ever_items = [it for it in items if it.get("content_type") == "evergreen"]
+    # hot / evergreen 분리 (anchor 후보에서 NON_ANCHOR_SOURCES 제외)
+    hot_items = [it for it in items if it.get("content_type") == "hot"
+                 and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES]
+    ever_items = [it for it in items if it.get("content_type") == "evergreen"
+                  and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES]
 
     hot_top = hot_items[:hot_count]
     ever_top = ever_items[:evergreen_count]
 
-    # Tier1 reserved slot: hot에 tier1이 없으면 전체에서 가장 높은 tier1 삽입
+    # Tier1 reserved slot: hot에 tier1이 없으면 anchor-eligible한 가장 높은 tier1 삽입
     has_tier1_in_hot = any(it.get("matched_tier") == "tier1" for it in hot_top)
     if not has_tier1_in_hot:
-        tier1_all = [it for it in items if it.get("matched_tier") == "tier1"]
+        tier1_all = [
+            it for it in items
+            if it.get("matched_tier") == "tier1"
+            and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
+        ]
         if tier1_all:
             best_tier1 = tier1_all[0]  # 이미 점수순 정렬됨
             if hot_top:

@@ -11,6 +11,7 @@ import time
 import pytest
 
 from pipeline import (
+    NON_ANCHOR_SOURCES,
     adapt_for_filter_seen,
     classify_content_type,
     compute_final_scores,
@@ -566,3 +567,110 @@ def test_adapt_display_score_cap_by_cross_source():
     assert by_title["Singleton"] <= 70
     assert by_title["Two sources"] <= 85
     assert by_title["Three sources"] <= 99
+
+
+# ===========================================================================
+# NON_ANCHOR_SOURCES
+# ===========================================================================
+
+
+def test_non_anchor_sources_exported():
+    """NON_ANCHOR_SOURCES is importable and contains youtube and geeknews."""
+    assert "youtube" in NON_ANCHOR_SOURCES
+    assert "geeknews" in NON_ANCHOR_SOURCES
+
+
+def test_run_pipeline_youtube_not_anchor():
+    """High-engagement YouTube tier1 item must not appear as a hot/evergreen anchor."""
+    items = [
+        {
+            "title": "Claude Opus 4.6 review NERFED",
+            "source": "youtube",
+            "engagement": 50,
+            "views": 200000,
+            "url": "https://youtube.com/yt-high",
+            "description": "claude",
+            "published": "1 hour ago",
+        },
+        {
+            "title": "Claude code tips and tricks",
+            "source": "github_trending",
+            "engagement": 80,
+            "url": "https://github.com/claude-tips",
+            "description": "claude",
+        },
+        {
+            "title": "Anthropic new model claude announcement",
+            "source": "hacker_news",
+            "engagement": 60,
+            "url": "https://hn.example.com/anthropic",
+            "description": "claude anthropic",
+        },
+    ]
+    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 2})
+    anchor_sources = [it["source"] for it in result["hot"] + result["evergreen"]]
+    assert "youtube" not in anchor_sources, f"YouTube appeared as anchor: {anchor_sources}"
+
+
+def test_run_pipeline_geeknews_not_anchor():
+    """High-engagement GeekNews tier1 item must not appear as a hot/evergreen anchor."""
+    items = [
+        {
+            "title": "Claude MCP model context protocol 소개",
+            "source": "geeknews",
+            "engagement": 50,
+            "url": "https://news.hada.io/mcp",
+            "description": "claude mcp",
+        },
+        {
+            "title": "Claude MCP deep dive",
+            "source": "github_trending",
+            "engagement": 80,
+            "url": "https://github.com/mcp-deep",
+            "description": "claude mcp",
+        },
+        {
+            "title": "Model context protocol claude explained",
+            "source": "hacker_news",
+            "engagement": 60,
+            "url": "https://hn.example.com/mcp",
+            "description": "claude mcp",
+        },
+    ]
+    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 2})
+    anchor_sources = [it["source"] for it in result["hot"] + result["evergreen"]]
+    assert "geeknews" not in anchor_sources, f"GeekNews appeared as anchor: {anchor_sources}"
+
+
+def test_run_pipeline_youtube_still_in_cluster_refs():
+    """YouTube item clusters with a GitHub item; GitHub is the anchor and YouTube appears in cluster_refs."""
+    shared_url = "https://github.com/karpathy/claude-tutorial"
+    items = [
+        {
+            "title": "karpathy claude tutorial walkthrough",
+            "source": "youtube",
+            "engagement": 50,
+            "views": 150000,
+            "url": shared_url,
+            "description": "claude tutorial",
+            "published": "2 days ago",
+        },
+        {
+            "title": "karpathy claude tutorial walkthrough",
+            "source": "github_trending",
+            "engagement": 300,
+            "url": shared_url,
+            "description": "claude tutorial",
+        },
+    ]
+    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 3})
+    all_anchors = result["hot"] + result["evergreen"]
+    # GitHub item should be anchor
+    github_anchor = next((it for it in all_anchors if it["source"] == "github_trending"), None)
+    assert github_anchor is not None, "GitHub item not found as anchor"
+    # YouTube should NOT be anchor
+    anchor_sources = [it["source"] for it in all_anchors]
+    assert "youtube" not in anchor_sources, f"YouTube appeared as anchor: {anchor_sources}"
+    # YouTube should appear in cluster_refs of the GitHub anchor
+    refs_sources = [r["source"] for r in github_anchor.get("cluster_refs", [])]
+    assert "youtube" in refs_sources, f"YouTube not in cluster_refs: {refs_sources}"
