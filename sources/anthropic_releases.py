@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 BLOG_URL = "https://claude.com/blog"
 NEWS_URL = "https://www.anthropic.com/news"
 TIMEOUT = 10
-BASE_ENGAGEMENT = 1500  # 공식 소스 기본 가산점
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -103,7 +102,6 @@ def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[
             "title": title,
             "url": full_url,
             "description": title,
-            "engagement": BASE_ENGAGEMENT,
         })
 
     return results[:15]
