@@ -211,23 +211,35 @@ def _translate_descriptions(items: list[dict]) -> list[dict]:
     return items
 
 
-def format_anthropic_html() -> str:
-    """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환."""
+def format_anthropic_html(kind: str = "all") -> str:
+    """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환.
+
+    kind: "blog" | "news" | "all"
+    """
     import html as html_mod
     esc = html_mod.escape
     from sources.anthropic_releases import fetch_anthropic_releases
 
-    items = fetch_anthropic_releases()
-    if not items:
-        return "📢 <b>Anthropic 공식</b>\n\n데이터 없음"
+    raw = fetch_anthropic_releases()
 
-    # 블로그와 뉴스를 분리해서 각각 할당
-    blog = [i for i in items if "claude.com/blog" in i["url"]][:4]
-    news = [i for i in items if "anthropic.com/news" in i["url"]][:3]
-    items = blog + news
+    if kind == "blog":
+        items = [i for i in raw if "claude.com/blog" in i["url"]][:4]
+        header = "📝 <b>Anthropic 블로그</b>"
+    elif kind == "news":
+        items = [i for i in raw if "anthropic.com/news" in i["url"]][:4]
+        header = "📰 <b>Anthropic 뉴스</b>"
+    else:
+        blog = [i for i in raw if "claude.com/blog" in i["url"]][:4]
+        news = [i for i in raw if "anthropic.com/news" in i["url"]][:3]
+        items = blog + news
+        header = "📢 <b>Anthropic 공식</b>"
+
+    if not items:
+        return f"{header}\n\n데이터 없음"
+
     items = _translate_descriptions(items)
 
-    lines = ["📢 <b>Anthropic 공식</b>", ""]
+    lines = [header, ""]
     for item in items:
         title = esc(item["title"])
         url = esc(item["url"])
@@ -263,6 +275,12 @@ def cli():
         help="모드 선택: hot (핫토픽), general (보편 주제), anthropic (공식 콘텐츠). 미지정시 대화형 선택.",
     )
     parser.add_argument(
+        "--kind",
+        choices=["blog", "news", "all"],
+        default="all",
+        help="anthropic 모드 전용: 블로그/뉴스 영역 분리 (기본: all)",
+    )
+    parser.add_argument(
         "--history",
         action="store_true",
         help="이력 목록 보기",
@@ -288,9 +306,9 @@ def cli():
     if args.mode == "anthropic":
         if markdown_mode:
             sys.stdout.reconfigure(encoding="utf-8")
-            print(format_anthropic_html())
+            print(format_anthropic_html(kind=args.kind))
         else:
-            console.print(format_anthropic_html())
+            console.print(format_anthropic_html(kind=args.kind))
         return
 
     # 이력 보기 모드
