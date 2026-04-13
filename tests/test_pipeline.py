@@ -459,7 +459,7 @@ def test_run_pipeline_end_to_end():
     """run_pipeline returns dict with hot/evergreen/all_scored/clusters keys; top items have final_score."""
     items = _synthetic_items_8()
     result = run_pipeline(items)
-    assert set(result.keys()) == {"hot", "evergreen", "all_scored", "clusters"}
+    assert set(result.keys()) == {"hot", "evergreen", "all_scored", "clusters", "max_score"}
     assert isinstance(result["hot"], list)
     assert isinstance(result["evergreen"], list)
     assert isinstance(result["all_scored"], list)
@@ -497,7 +497,7 @@ def test_run_pipeline_respects_hot_count():
 def test_run_pipeline_empty_input():
     """Empty list returns the expected empty-dict structure without crash."""
     result = run_pipeline([])
-    assert result == {"hot": [], "evergreen": [], "all_scored": [], "clusters": []}
+    assert result == {"hot": [], "evergreen": [], "all_scored": [], "clusters": [], "max_score": 1.0}
 
 
 # ===========================================================================
@@ -539,14 +539,15 @@ def test_adapt_exactly_one_reference():
 
 
 def test_adapt_display_score_range():
-    """score field is int in [0, 100]."""
-    # final_score=6.0 → score=100 (max); final_score=0 → score=0
+    """score field is int in [0, 99]; top item scores 99 when max_score matches."""
     items = [
         _make_adapted_item(final_score=6.0),
         _make_adapted_item(final_score=0.0),
         _make_adapted_item(final_score=3.0),
     ]
-    result = adapt_for_filter_seen(items)
+    result = adapt_for_filter_seen(items, max_score=6.0)
     for topic in result:
         assert isinstance(topic["score"], int)
-        assert 0 <= topic["score"] <= 100
+        assert 0 <= topic["score"] <= 99
+    # top item (final_score==max_score) should score exactly 99
+    assert result[0]["score"] == 99

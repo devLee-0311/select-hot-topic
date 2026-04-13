@@ -484,21 +484,24 @@ def run_pipeline(items: list[dict], config: dict | None = None) -> dict:
         else:
             it["cluster_refs"] = []
 
+    max_score = max((i.get("final_score", 0.0) for i in items), default=1.0) or 1.0
+
     return {
         "hot": hot_top,
         "evergreen": ever_top,
         "all_scored": items,
         "clusters": clusters,
+        "max_score": max_score,
     }
 
 
-def adapt_for_filter_seen(items: list[dict]) -> list[dict]:
+def adapt_for_filter_seen(items: list[dict], max_score: float = 6.0) -> list[dict]:
     """파이프라인 출력을 filter_seen() 호환 형태로 변환."""
     topics = []
     for item in items:
         raw_eng = _get_raw_engagement(item)
         source = item.get("source", "")
-        score = min(100, int(item.get("final_score", 0) / 6.0 * 100))
+        score = min(99, int(item.get("final_score", 0) / max_score * 99))
 
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
         cross = item.get("cross_source_count", 1)

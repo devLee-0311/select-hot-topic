@@ -163,7 +163,7 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-def format_pipeline_html(result: dict, mode_label: str) -> str:
+def format_pipeline_html(result: dict, mode_label: str, max_score: float = 6.0) -> str:
     """run_pipeline() 결과를 Telegram HTML 형식으로 변환 (hot + evergreen 2섹션)."""
     esc = html_mod.escape
     NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
@@ -181,7 +181,7 @@ def format_pipeline_html(result: dict, mode_label: str) -> str:
             lines.append(f"{num_emoji} <a href=\"{url}\">{title}</a>")
 
             final_score = item.get("final_score", 0)
-            display_score = min(100, int(final_score / 6.0 * 100))
+            display_score = min(99, int(final_score / max_score * 99))
             score_line = f"   📊 {display_score}/100"
 
             tier = item.get("matched_tier", "")
@@ -463,7 +463,7 @@ def cli():
 
     # filter_seen 적용
     all_topics_flat = pipeline_result["hot"] + pipeline_result["evergreen"]
-    wrapped = adapt_for_filter_seen(all_topics_flat)
+    wrapped = adapt_for_filter_seen(all_topics_flat, max_score=pipeline_result.get("max_score", 6.0))
 
     # content_type 메타데이터를 wrapped에 전달 (split 복원용)
     for i, item in enumerate(all_topics_flat):
@@ -486,7 +486,7 @@ def cli():
 
     if markdown_mode:
         sys.stdout.reconfigure(encoding="utf-8")
-        print(format_pipeline_html(display_result, mode_config.label))
+        print(format_pipeline_html(display_result, mode_config.label, max_score=pipeline_result.get("max_score", 6.0)))
         return
 
     # rich CLI 출력
@@ -497,7 +497,7 @@ def cli():
         # wrap as legacy topic shape for display_topic
         raw_eng = item.get("engagement", 0)
         source = item.get("source", "")
-        score = min(100, int(item.get("final_score", 0) / 6.0 * 100))
+        score = min(99, int(item.get("final_score", 0) / pipeline_result.get("max_score", 6.0) * 99))
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
         cross = item.get("cross_source_count", 1)
         if cross >= 2:
