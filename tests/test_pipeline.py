@@ -539,15 +539,30 @@ def test_adapt_exactly_one_reference():
 
 
 def test_adapt_display_score_range():
-    """score field is int in [0, 99]; top item scores 99 when max_score matches."""
+    """score field is int in [0, 99]; singleton top item is capped at 70, not 99."""
     items = [
-        _make_adapted_item(final_score=6.0),
-        _make_adapted_item(final_score=0.0),
-        _make_adapted_item(final_score=3.0),
+        _make_adapted_item(final_score=6.0, cross_source_count=1),
+        _make_adapted_item(final_score=0.0, cross_source_count=1),
+        _make_adapted_item(final_score=3.0, cross_source_count=1),
     ]
     result = adapt_for_filter_seen(items, max_score=6.0)
     for topic in result:
         assert isinstance(topic["score"], int)
         assert 0 <= topic["score"] <= 99
-    # top item (final_score==max_score) should score exactly 99
-    assert result[0]["score"] == 99
+    # singleton top item is capped at 70 (cross_source_count=1)
+    assert result[0]["score"] <= 70
+
+
+def test_adapt_display_score_cap_by_cross_source():
+    """Cross-source cap: singleton<=70, 2-source<=85, 3-source<=99."""
+    max_score = 6.0
+    items = [
+        _make_adapted_item(title="Singleton", final_score=6.0, cross_source_count=1),
+        _make_adapted_item(title="Two sources", final_score=6.0, cross_source_count=2),
+        _make_adapted_item(title="Three sources", final_score=6.0, cross_source_count=3),
+    ]
+    result = adapt_for_filter_seen(items, max_score=max_score)
+    by_title = {t["topic"]: t["score"] for t in result}
+    assert by_title["Singleton"] <= 70
+    assert by_title["Two sources"] <= 85
+    assert by_title["Three sources"] <= 99

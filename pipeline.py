@@ -58,6 +58,8 @@ TIER_WEIGHTS = {"tier1": 1.5, "tier2": 1.0, "tier3": 0.6}
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
 SIMILARITY_THRESHOLD = 0.4
 
+DISPLAY_SCORE_CAP_BY_CROSS = {1: 70, 2: 85, 3: 99, 4: 99, 5: 99}
+
 CLUSTER_SIMILARITY_THRESHOLD = 0.55
 CLUSTER_MIN_SHARED_KEYWORDS = 2
 
@@ -501,7 +503,10 @@ def adapt_for_filter_seen(items: list[dict], max_score: float = 6.0) -> list[dic
     for item in items:
         raw_eng = _get_raw_engagement(item)
         source = item.get("source", "")
-        score = min(99, int(item.get("final_score", 0) / max_score * 99))
+        cross = item.get("cross_source_count", 1)
+        cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
+        relative = int(item.get("final_score", 0) / max_score * 99) if max_score > 0 else 0
+        score = min(cap, relative)
 
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
         cross = item.get("cross_source_count", 1)

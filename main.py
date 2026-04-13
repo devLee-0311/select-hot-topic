@@ -16,7 +16,7 @@ from rich.panel import Panel
 
 from history import get_used_urls, save_topic
 from modes import HOT_CONFIG, GENERAL_CONFIG, MODES
-from pipeline import run_pipeline, adapt_for_filter_seen
+from pipeline import run_pipeline, adapt_for_filter_seen, DISPLAY_SCORE_CAP_BY_CROSS
 
 console = Console()
 
@@ -181,7 +181,9 @@ def format_pipeline_html(result: dict, mode_label: str, max_score: float = 6.0) 
             lines.append(f"{num_emoji} <a href=\"{url}\">{title}</a>")
 
             final_score = item.get("final_score", 0)
-            display_score = min(99, int(final_score / max_score * 99))
+            cross = item.get("cross_source_count", 1)
+            cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
+            display_score = min(cap, int(final_score / max_score * 99) if max_score > 0 else 0)
             score_line = f"   📊 {display_score}/100"
 
             tier = item.get("matched_tier", "")
@@ -497,7 +499,10 @@ def cli():
         # wrap as legacy topic shape for display_topic
         raw_eng = item.get("engagement", 0)
         source = item.get("source", "")
-        score = min(99, int(item.get("final_score", 0) / pipeline_result.get("max_score", 6.0) * 99))
+        _cross = item.get("cross_source_count", 1)
+        _cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(_cross, 5), 99)
+        _max = pipeline_result.get("max_score", 6.0)
+        score = min(_cap, int(item.get("final_score", 0) / _max * 99) if _max > 0 else 0)
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
         cross = item.get("cross_source_count", 1)
         if cross >= 2:
