@@ -2,7 +2,7 @@ name: Daily Hot Topic
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # UTC 23:00 = KST 08:00
+    - cron: '0 23,11 * * *'  # UTC 23:00 / 11:00 = KST 08:00 / 20:00 (2회/일)
   workflow_dispatch:  # 수동 실행
 
 jobs:
@@ -15,40 +15,32 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install requests beautifulsoup4 praw rich python-dotenv anthropic
-      - name: Collect hot topics
-        run: python main.py --mode hot --hot-n 4 --evergreen-n 4 --format markdown > hot_result.txt
+      - name: Collect sector topics
+        run: python main.py --mode sector --format markdown --auto-save > sector_out.txt
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-      - name: Collect Anthropic blog
-        run: python main.py --mode anthropic --kind blog --format markdown > anthropic_blog.txt
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      - name: Collect Anthropic news
-        run: python main.py --mode anthropic --kind news --format markdown > anthropic_news.txt
-        env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - name: Send to Telegram
         run: |
           set -e
           DATE=$(TZ=Asia/Seoul date +"%Y-%m-%d (%a)")
-          {
-            echo "📅 <b>${DATE}</b>"
-            echo ""
-            cat hot_result.txt
-            echo ""
-            echo "━━━━━━━━━━━━━━━"
-            echo ""
-            cat anthropic_blog.txt
-            echo ""
-            echo "━━━━━━━━━━━━━━━"
-            echo ""
-            cat anthropic_news.txt
-          } > message.txt
-          MESSAGE=$(cat message.txt)
-          RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=${MESSAGE}" \
-            -d parse_mode=HTML)
-          echo "$RESPONSE"
-          echo "$RESPONSE" | grep -q '"ok":true' || exit 1
+          awk 'BEGIN{n=0} /^@@@SECTOR_BREAK@@@$/{n++; next} {print > ("chunk_" n ".txt")}' sector_out.txt
+          FIRST=1
+          for f in chunk_*.txt; do
+            CONTENT=$(cat "$f")
+            if [ "$FIRST" = "1" ]; then
+              MSG="📅 <b>${DATE}</b>"$'\n\n'"${CONTENT}"
+              FIRST=0
+            else
+              MSG="${CONTENT}"
+            fi
+            RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --data-urlencode "text=${MSG}" \
+              -d parse_mode=HTML \
+              -d disable_web_page_preview=true)
+            echo "$RESPONSE"
+            echo "$RESPONSE" | grep -q '"ok":true' || exit 1
+            sleep 1
+          done

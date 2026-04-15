@@ -19,4 +19,4 @@
 
 ## GitHub Actions (Telegram 알림) 출력 형식
 
-`--format markdown` 모드에서는 위와 동일한 형식을 따르되, **점수가 높은 순으로 3개**를 출력한다. hot/general 모드 각각 3개씩.
+`--format markdown` 모드에서는 위와 동일한 형식을 따르되, **점수가 높은 순으로 3개**를 출력한다. sector (hot alias) 모드 3개 + anthropic 모드 출력.

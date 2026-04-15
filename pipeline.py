@@ -1,4 +1,4 @@
-"""키워드 티어링 → 클러스터 → 정규화 → 분류 → 최종 스코어링 파이프라인."""
+"""섹터 라우팅 → 클러스터 → 정규화 → 스코어링 파이프라인."""
 
 from __future__ import annotations
 
@@ -9,41 +9,105 @@ from datetime import datetime
 
 from utils import clean_for_compare, similarity
 
-# ── 키워드 티어 ──────────────────────────────────────────────
+# ── 섹터 정의 ────────────────────────────────────────────────
+# 순서가 중요: 첫 매칭 섹터가 승리. 각 섹터는 5개 슬롯씩 배정.
 
-KEYWORD_TIERS = {
-    "tier1_core": {
-        "keywords": [
-            "claude", "anthropic", "mcp", "claude code",
-            "model context protocol", "클로드", "앤트로픽",
-        ],
-        "min_engagement": 0,
-    },
-    "tier2_adjacent": {
-        "keywords": [
-            "cursor", "copilot", "langchain", "langgraph",
-            "ai-agent", "agentic", "openai", "gemini",
-            "windsurf", "cline", "v0", "bolt",
-            "autogen", "crewai", "dspy",
-        ],
-        "min_engagement": {
-            "github": 50, "hackernews": 10, "reddit": 50,
-            "youtube": 5000, "geeknews": 3,
+SECTORS: list[tuple[str, dict]] = [
+    (
+        "anthropic_news",
+        {
+            "label": "Anthropic 공식 뉴스",
+            "emoji": "📰",
+            "match_url": "anthropic.com/news",
+            "count": 5,
         },
-    },
-    "tier3_broad": {
-        "keywords": [
-            "llm", "gpt", "ai", "machine learning",
-            "devtools", "developer tools", "rag",
-            "fine-tuning", "prompt engineering",
-            "vector database", "embedding",
-            "transformer", "diffusion",
-            "cybersecurity", "cloud", "privacy",
-        ],
-        "min_engagement_percentile": 90,
-        "or_cross_source_count": 2,
-    },
+    ),
+    (
+        "anthropic_blog",
+        {
+            "label": "Anthropic 공식 블로그",
+            "emoji": "📝",
+            "match_url": "claude.com/blog",
+            "count": 5,
+        },
+    ),
+    (
+        "claude_code",
+        {
+            "label": "Claude Code",
+            "emoji": "🧡",
+            "include": [
+                "claude code", "claude-code", "claudecode", "subagent",
+                "sub-agent", "skills", "slash command", "hooks", "mcp",
+                "model context protocol", "클로드 코드",
+            ],
+            "deny": [],
+            "count": 5,
+        },
+    ),
+    (
+        "agents",
+        {
+            "label": "에이전트 / 자동화",
+            "emoji": "🤖",
+            "include": [
+                "langgraph", "crewai", "autogen", "autogpt", "agentops",
+                "devin", "hermes", "multi-agent", "multi agent", "swarm",
+                "agent sdk", "agentic", "browser use", "computer use",
+                "tool use", "function calling", "에이전트", "에이전틱",
+                "ai agent", "ai agents", "autonomous agent", "agent framework",
+                "agent builder", "agent workflow", "workflow agent",
+                "langchain", "llamaindex", "llama-index",
+                "n8n", "dify", "flowise", "openhands", "smolagents",
+                "openai agents", "agents sdk", "pydantic-ai", "pydantic ai",
+                "agno", "mastra", "letta", "memgpt", "openai swarm",
+            ],
+            "deny": ["claude code"],
+            "count": 5,
+        },
+    ),
+    (
+        "local_llm",
+        {
+            "label": "로컬 LLM",
+            "emoji": "💻",
+            "include": [
+                "ollama", "lm studio", "llama.cpp", "llamacpp", "llama ",
+                "mistral", "deepseek", "qwen", "gguf", "quantiz",
+                "gpt4all", "koboldcpp", "textgen", "로컬 llm",
+            ],
+            "deny": ["anthropic only", "claude-only"],
+            "count": 5,
+        },
+    ),
+    (
+        "ai_infra",
+        {
+            "label": "AI 인프라 / 툴링",
+            "emoji": "⚙️",
+            "include": [
+                "codex", "gpt-5", "gpt5", "sora", "chatgpt", "cursor",
+                "windsurf", "copilot", "aider", "continue.dev",
+                "openrouter", "vercel ai", "openai",
+            ],
+            "deny": [],
+            "count": 5,
+        },
+    ),
+]
+
+SECTORS_BY_KEY: dict[str, dict] = {name: cfg for name, cfg in SECTORS}
+
+# 키워드 기반 섹터 (URL 라우팅이 아닌 섹터) — non-anchor 제외 대상.
+KEYWORD_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+
+# 클러스터 노이즈에서 강제로 제외되는 단어 — generic하지만 섹터 구분에 필수.
+# 이 단어들이 SECTOR_CLUSTER_NOISE에 포함되면 클러스터링 신호가 너무 얕아진다.
+CLUSTER_NOISE_HARD_EXCLUDE = {
+    "agent", "agents", "agentic", "tool", "use", "hooks", "skills",
+    "cc", "codex", "mcp",
 }
+
 
 SOURCE_FAMILY = {
     "github_trending": "github",
@@ -54,32 +118,34 @@ SOURCE_FAMILY = {
 }
 
 # Sources that can contribute to cross_source_count and refs, but cannot be anchor items.
-# Rationale: YouTube competes directly with user's own YouTube content; GeekNews is a
-# Korean aggregator so its topics are already derivative of other sources we fetch.
+# Rationale: YouTube competes directly with user's own YouTube content; GeekNews is 한국
+# 애그리게이터라 이미 다른 소스에서 긁어오는 파생 콘텐츠다.
 NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
 
-TIER_WEIGHTS = {"tier1": 1.5, "tier2": 1.0, "tier3": 0.6}
+# anthropic_releases 아이템이 cluster boost나 refs로 "끼어들면 안 되는" 섹터들.
+# 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
+# claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
+# 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
+NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+ANTHROPIC_SOURCE_FAMILY = "anthropic"  # _source_family("anthropic_releases")
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
 SIMILARITY_THRESHOLD = 0.4
 
 DISPLAY_SCORE_CAP_BY_CROSS = {1: 70, 2: 85, 3: 99, 4: 99, 5: 99}
+FRESH_SINGLETON_CAP = 90  # singleton + 신선도(<6h, multiplier>=1.3) 일 때 상한 완화
 
-CLUSTER_SIMILARITY_THRESHOLD = 0.55
-CLUSTER_MIN_SHARED_KEYWORDS = 2
-
-HOT_SIGNAL_KEYWORDS = [
-    "release", "launch", "announce", "breaking",
-    "outage", "deprecated", "출시", "발표", "장애", "지원중단",
-]
-EVERGREEN_SIGNAL_KEYWORDS = [
-    "tutorial", "guide", "how-to", "comparison",
-    "vs", "비교", "가이드", "입문", "정리",
+# 시간 감쇠 스텝 버킷: (max_hours, multiplier).
+# 마지막 튜플의 max_hours=None은 "그보다 오래됨"의 기본값을 의미.
+RECENCY_BUCKETS: list[tuple[float | None, float]] = [
+    (6, 1.30),
+    (24, 1.00),
+    (72, 0.70),
+    (None, 0.40),
 ]
 
-RECENCY_DECAY_HOURS = 72
-RECENCY_FLOOR = 0.3
-TIER1_ENGAGEMENT_FLOOR = 0.1
+CLUSTER_SIMILARITY_THRESHOLD = 0.45  # 섹터 노이즈 제거 후 짧아진 문자열용
+CLUSTER_MIN_SHARED_KEYWORDS = 1      # 섹터 키워드는 빼고 1개 이상 공유
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────
@@ -99,18 +165,8 @@ def _get_raw_engagement(item: dict) -> float:
 
 
 def _searchable_text(item: dict) -> str:
-    """티어 매칭용 검색 텍스트."""
+    """섹터 매칭용 검색 텍스트."""
     return f"{item.get('title', '')} {item.get('description', '')} {item.get('url', '')}".lower()
-
-
-def _match_tier(text: str) -> tuple[str | None, list[str]]:
-    """텍스트가 매칭되는 최상위 티어와 매칭 키워드 반환."""
-    for tier_name, tier_order in [("tier1_core", "tier1"), ("tier2_adjacent", "tier2"), ("tier3_broad", "tier3")]:
-        tier = KEYWORD_TIERS[tier_name]
-        matched = [kw for kw in tier["keywords"] if kw in text]
-        if matched:
-            return tier_order, matched
-    return None, []
 
 
 def _has_cross_source_mention(item: dict, all_items: list[dict]) -> bool:
@@ -135,71 +191,84 @@ def _has_cross_source_mention(item: dict, all_items: list[dict]) -> bool:
     return False
 
 
+# ── 섹터 라우팅 ─────────────────────────────────────────────
+
+def assign_sector(item: dict) -> str | None:
+    """아이템을 섹터 키에 매핑. 규칙 순서 준수, 첫 매칭 승리.
+
+    1. source=anthropic_releases + URL에 'anthropic.com/news' → anthropic_news
+    2. source=anthropic_releases + URL에 'claude.com/blog' → anthropic_blog
+    3. 4개 pillar 순회 (claude_code → agents → local_llm → ai_infra):
+       include 키워드 히트 AND deny 키워드 미스 → 해당 pillar
+    4. 매칭 없음 → None (제외)
+    """
+    source = item.get("source", "")
+    url = item.get("url", "").lower()
+
+    if source == "anthropic_releases":
+        if "anthropic.com/news" in url:
+            return "anthropic_news"
+        if "claude.com/blog" in url:
+            return "anthropic_blog"
+
+    text = _searchable_text(item)
+    for name, cfg in SECTORS:
+        if name not in KEYWORD_SECTORS:
+            continue
+        include = cfg.get("include", [])
+        deny = cfg.get("deny", [])
+        if not any(kw in text for kw in include):
+            continue
+        if any(dkw in text for dkw in deny):
+            continue
+        return name
+    return None
+
+
+# ── 클러스터 노이즈 ─────────────────────────────────────────
+
+def _build_sector_cluster_noise() -> frozenset[str]:
+    """섹터 라우팅 키워드를 클러스터 신호에서 제외하기 위한 노이즈 셋.
+
+    SECTORS의 include 키워드를 clean_for_compare로 정제 후 토큰 단위로 모은다.
+    예: 'claude code' → {'claude', 'code'}, 'gpt-5-codex' → {'gpt-5-codex'}.
+    `CLUSTER_NOISE_HARD_EXCLUDE`에 속하는 단어는 섹터 신호로 필수이므로
+    노이즈에서 강제로 제외하여 클러스터 신호로 남긴다.
+    """
+    words: set[str] = set()
+    for _, spec in SECTORS:
+        for kw in spec.get("include", []):
+            cleaned = clean_for_compare(kw)
+            words.update(cleaned.split())
+    words -= CLUSTER_NOISE_HARD_EXCLUDE
+    return frozenset(words)
+
+
+SECTOR_CLUSTER_NOISE = _build_sector_cluster_noise()
+
+
 # ── 파이프라인 단계 ──────────────────────────────────────────
 
-def tag_tiers(items: list[dict], skip_tiering: bool = False) -> list[dict]:
-    """각 아이템에 matched_tier, matched_keywords 필드 부여. 매칭 안 되면 제외."""
-    if skip_tiering:
-        for item in items:
-            item["matched_tier"] = "tier2"
-            item["matched_keywords"] = []
-        return items
-
-    # tier3 필터링용: 상위 10% engagement 임계값 계산
-    engagements = sorted([_get_raw_engagement(it) for it in items if _get_raw_engagement(it) > 0])
-    if engagements:
-        idx = max(0, int(len(engagements) * 0.9) - 1)
-        top10_threshold = engagements[idx]
-    else:
-        top10_threshold = float("inf")
-
-    result = []
-    for item in items:
-        text = _searchable_text(item)
-        tier, matched_kws = _match_tier(text)
-        if tier is None:
-            continue
-
-        item["matched_tier"] = tier
-        item["matched_keywords"] = matched_kws
-
-        # tier2: per-source min_engagement 필터
-        if tier == "tier2":
-            family = _source_family(item.get("source", ""))
-            min_eng = KEYWORD_TIERS["tier2_adjacent"]["min_engagement"]
-            if isinstance(min_eng, dict):
-                threshold = min_eng.get(family, 0)
-            else:
-                threshold = min_eng
-            if _get_raw_engagement(item) < threshold:
-                continue
-
-        # tier3: cross-source 또는 상위 10% engagement 필요
-        if tier == "tier3":
-            has_cross = _has_cross_source_mention(item, items)
-            in_top10 = _get_raw_engagement(item) >= top10_threshold
-            if not has_cross and not in_top10:
-                continue
-
-        result.append(item)
-
-    return result
-
-
 def _titles_cluster(a: str, b: str) -> bool:
-    """두 제목이 클러스터링 기준을 충족하는지 판정.
+    """두 제목이 클러스터링 기준을 충족하는지 판정. 섹터 라우팅 키워드는 신호에서 제외.
 
-    CLUSTER_MIN_SHARED_KEYWORDS 이상의 공유 단어 AND
-    similarity >= CLUSTER_SIMILARITY_THRESHOLD 를 모두 만족해야 True.
+    두 가지 동시 충족 시 True:
+      1. SECTOR_CLUSTER_NOISE를 뺀 공유 단어가 CLUSTER_MIN_SHARED_KEYWORDS개 이상
+      2. 노이즈 제거된 문자열 간 similarity가 CLUSTER_SIMILARITY_THRESHOLD 이상
     """
     ca, cb = clean_for_compare(a), clean_for_compare(b)
     if not ca or not cb:
         return False
     words_a = set(ca.split())
     words_b = set(cb.split())
-    if len(words_a & words_b) < CLUSTER_MIN_SHARED_KEYWORDS:
+    shared = (words_a & words_b) - SECTOR_CLUSTER_NOISE
+    if len(shared) < CLUSTER_MIN_SHARED_KEYWORDS:
         return False
-    return similarity(a, b) >= CLUSTER_SIMILARITY_THRESHOLD
+    ca_stripped = " ".join(w for w in ca.split() if w not in SECTOR_CLUSTER_NOISE)
+    cb_stripped = " ".join(w for w in cb.split() if w not in SECTOR_CLUSTER_NOISE)
+    if not ca_stripped or not cb_stripped:
+        return False
+    return similarity(ca_stripped, cb_stripped) >= CLUSTER_SIMILARITY_THRESHOLD
 
 
 def detect_clusters(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -284,7 +353,7 @@ def normalize_engagement(items: list[dict]) -> list[dict]:
         family = _source_family(item.get("source", ""))
         groups[family].append(item)
 
-    for family, group in groups.items():
+    for group in groups.values():
         n = len(group)
         if n == 1:
             group[0]["engagement_normalized"] = 1.0
@@ -328,7 +397,13 @@ _YOUTUBE_TIME_MULTIPLIERS = {
 
 
 def _parse_hours_since(item: dict) -> float | None:
-    """아이템의 게시 후 경과 시간(hours) 계산."""
+    """아이템의 게시 후 경과 시간(hours) 계산.
+
+    읽는 필드 우선순위:
+      1. YouTube의 `published` 문자열 (e.g. "2 days ago")
+      2. `created` / `created_utc` (unix timestamp 또는 ISO 문자열)
+      3. `published_at` (Anthropic RSS — datetime 객체 혹은 ISO 문자열)
+    """
     now = time.time()
 
     # YouTube published 필드 (e.g. "2 days ago")
@@ -354,154 +429,177 @@ def _parse_hours_since(item: dict) -> float | None:
             except (ValueError, OSError):
                 pass
 
+    # published_at (Anthropic RSS) — datetime 혹은 ISO 문자열
+    raw = item.get("published_at")
+    if raw is not None:
+        if isinstance(raw, datetime):
+            try:
+                return max(0, (now - raw.timestamp()) / 3600)
+            except (ValueError, OSError):
+                pass
+        elif isinstance(raw, (int, float)):
+            return max(0, (now - raw) / 3600)
+        elif isinstance(raw, str):
+            try:
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                return max(0, (now - dt.timestamp()) / 3600)
+            except (ValueError, OSError):
+                pass
+
     return None
 
 
-def classify_content_type(items: list[dict]) -> list[dict]:
-    """각 아이템을 hot/evergreen으로 분류."""
+def _recency_multiplier(item: dict) -> float:
+    """시간 버킷에 따른 배수 반환. 타임스탬프 없으면 중립 1.0."""
+    hours = _parse_hours_since(item)
+    if hours is None:
+        return 1.0
+    for cap, mult in RECENCY_BUCKETS:
+        if cap is None or hours <= cap:
+            return mult
+    return 0.4
+
+
+def compute_sector_scores(items: list[dict]) -> list[dict]:
+    """섹터 모델 최종 점수 계산. 스텝 버킷 recency multiplier 반영.
+
+    final_score = engagement_normalized × cross_source_boost × recency_multiplier
+
+    - recency_multiplier는 `_recency_multiplier`로 계산. 타임스탬프 없으면 1.0(중립).
+    - 디버깅/표시용으로 item["recency_multiplier"]에 배수를 저장.
+    """
     for item in items:
-        hours = _parse_hours_since(item)
-        item["hours_since_published"] = hours
-        eng_norm = item.get("engagement_normalized", 0.5)
-        cross = item.get("cross_source_count", 1)
-        text = _searchable_text(item)
-
-        is_hot = False
-        is_evergreen = False
-
-        # HOT 판정
-        if hours is not None and hours < 24 and eng_norm >= 0.80:
-            is_hot = True
-        if cross >= 2:
-            is_hot = True
-        if any(kw in text for kw in HOT_SIGNAL_KEYWORDS):
-            is_hot = True
-
-        # EVERGREEN 판정
-        if hours is not None and hours >= 72 and eng_norm >= 0.50:
-            is_evergreen = True
-        source = item.get("source", "")
-        if _source_family(source) == "youtube" and hours is not None and hours >= 168 and eng_norm >= 0.60:
-            is_evergreen = True
-        if any(kw in text for kw in EVERGREEN_SIGNAL_KEYWORDS):
-            is_evergreen = True
-
-        if is_hot:
-            item["content_type"] = "hot"
-        elif is_evergreen:
-            item["content_type"] = "evergreen"
-        else:
-            # 기본값: cross-source 또는 높은 engagement가 있으면 hot, 아니면 evergreen
-            if cross >= 2 or eng_norm >= 0.5:
-                item["content_type"] = "hot"
-            else:
-                item["content_type"] = "evergreen"
-
-    return items
-
-
-def compute_final_scores(items: list[dict], config: dict | None = None) -> list[dict]:
-    """최종 점수 계산."""
-    weights = TIER_WEIGHTS
-    if config and "tier_weights" in config:
-        weights = config["tier_weights"]
-
-    for item in items:
-        tier = item.get("matched_tier", "tier2")
-        tier_w = weights.get(tier, 1.0)
         eng_norm = item.get("engagement_normalized", 0.5)
         boost = item.get("cross_source_boost", 1.0)
-
-        # tier1 floor
-        if tier == "tier1":
-            eng_norm = max(eng_norm, TIER1_ENGAGEMENT_FLOOR)
-
-        score = eng_norm * tier_w * boost
-
-        # hot recency 보정
-        if item.get("content_type") == "hot" and item.get("hours_since_published") is not None:
-            recency = max(RECENCY_FLOOR, 1.0 - item["hours_since_published"] / RECENCY_DECAY_HOURS)
-            score *= recency
-
-        item["final_score"] = round(score, 4)
-
+        rec = _recency_multiplier(item)
+        item["recency_multiplier"] = rec
+        item["final_score"] = round(eng_norm * boost * rec, 4)
     return items
 
 
-def run_pipeline(items: list[dict], config: dict | None = None) -> dict:
-    """전체 파이프라인 실행. config: skip_tiering, hot_count, evergreen_count, tier_weights."""
+def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
+    """섹터 라우팅 기반 전체 파이프라인.
+
+    1. detect_clusters
+    2. normalize_engagement
+    3. assign_sector (각 아이템)
+    4. 섹터별 클러스터 효과 재조정 — anthropic_releases는 non-official 섹터에서 제외
+    5. compute_sector_scores (재조정된 boost 반영)
+    6. 섹터별 그룹핑 — 키워드 섹터는 NON_ANCHOR_SOURCES 제외, 점수 내림차순 정렬, count 슬롯으로 자름
+    7. cluster_refs 부착 (동일한 섹터 기반 제외 규칙 적용)
+    8. max_score 계산
+
+    config 옵션:
+      sector_counts: dict[str, int] — 섹터별 기본 5 슬롯 오버라이드
+    """
     if config is None:
         config = {}
 
-    hot_count = config.get("hot_count", 3)
-    evergreen_count = config.get("evergreen_count", 2)
+    sector_counts_override = config.get("sector_counts", {}) or {}
 
-    # 파이프라인 단계 순차 실행
-    items = tag_tiers(items, skip_tiering=config.get("skip_tiering", False))
+    # 1. 클러스터링
     items, clusters = detect_clusters(items)
+    # 2. 정규화
     items = normalize_engagement(items)
-    items = classify_content_type(items)
-    items = compute_final_scores(items, config)
+    # 3. 섹터 할당 (스코어링 전에 먼저 — per-sector 클러스터 재조정을 위해)
+    for item in items:
+        item["sector"] = assign_sector(item)
 
-    # 점수 내림차순 정렬
-    items.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-
-    # hot / evergreen 분리 (anchor 후보에서 NON_ANCHOR_SOURCES 제외)
-    hot_items = [it for it in items if it.get("content_type") == "hot"
-                 and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES]
-    ever_items = [it for it in items if it.get("content_type") == "evergreen"
-                  and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES]
-
-    hot_top = hot_items[:hot_count]
-    ever_top = ever_items[:evergreen_count]
-
-    # Tier1 reserved slot: hot에 tier1이 없으면 anchor-eligible한 가장 높은 tier1 삽입
-    has_tier1_in_hot = any(it.get("matched_tier") == "tier1" for it in hot_top)
-    if not has_tier1_in_hot:
-        tier1_all = [
-            it for it in items
-            if it.get("matched_tier") == "tier1"
-            and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
-        ]
-        if tier1_all:
-            best_tier1 = tier1_all[0]  # 이미 점수순 정렬됨
-            if hot_top:
-                hot_top[-1] = best_tier1
-            else:
-                hot_top.append(best_tier1)
-
-    # Attach cluster_refs to each hot/evergreen item
+    # 4. 섹터별 클러스터 효과 재조정
+    #    anthropic_releases 아이템은 NON_OFFICIAL_SECTORS 소속 아이템의 교차 소스 카운트와
+    #    cross_source_boost에 기여하지 않는다. 싱글턴(cluster_id is None)은 영향 없음.
     cluster_map: dict[int, list[dict]] = defaultdict(list)
     for it in items:
         cid = it.get("cluster_id")
         if cid is not None:
             cluster_map[cid].append(it)
 
-    for it in hot_top + ever_top:
+    for it in items:
         cid = it.get("cluster_id")
-        if cid is not None and len(cluster_map[cid]) >= 2:
-            others = [
-                m for m in cluster_map[cid]
-                if m is not it
-            ]
-            others.sort(key=lambda m: _get_raw_engagement(m), reverse=True)
-            it["cluster_refs"] = [
-                {
-                    "title": m.get("title", ""),
-                    "url": m.get("url", ""),
-                    "source": m.get("source", ""),
-                    "engagement": _get_raw_engagement(m),
-                }
-                for m in others[:4]
-            ]
-        else:
-            it["cluster_refs"] = []
+        if cid is None:
+            continue
+        sector = it.get("sector")
+        excluded_families: set[str] = set()
+        if sector in NON_OFFICIAL_SECTORS:
+            excluded_families.add(ANTHROPIC_SOURCE_FAMILY)
+        if not excluded_families:
+            continue  # 기존 값 유지
+        families = set()
+        for m in cluster_map[cid]:
+            fam = _source_family(m.get("source", ""))
+            if fam in excluded_families:
+                continue
+            families.add(fam)
+        eff_count = max(1, len(families))
+        eff_boost = CROSS_SOURCE_BOOST.get(eff_count, 4.0) if eff_count <= 3 else 4.0
+        it["cross_source_count"] = eff_count
+        it["cross_source_boost"] = eff_boost
 
-    max_score = max((i.get("final_score", 0.0) for i in items), default=1.0) or 1.0
+    # 5. 스코어링 (재조정된 boost 기준)
+    items = compute_sector_scores(items)
+
+    # 6. 섹터별 그룹핑 / 필터링 / 정렬 / 자르기
+    sectors_out: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for item in items:
+        sec = item.get("sector")
+        if sec is None:
+            continue
+        grouped[sec].append(item)
+
+    for name, cfg in SECTORS:
+        group = grouped.get(name, [])
+        if name in KEYWORD_SECTORS:
+            group = [
+                it for it in group
+                if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
+            ]
+        group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
+        count = sector_counts_override.get(name, cfg.get("count", 5))
+        sectors_out[name] = group[:count]
+
+    # 7. cluster_refs 부착
+    for name, sector_items in sectors_out.items():
+        for it in sector_items:
+            cid = it.get("cluster_id")
+            if cid is not None and len(cluster_map[cid]) >= 2:
+                # NON_ANCHOR_SOURCES(youtube/geeknews)는 anchor는 못 되지만 refs에는
+                # 보여줘야 한다 (cross_source_count에도 포함됨). 여기서는 제외하지 않음.
+                excluded_families: set[str] = set()
+                if name in NON_OFFICIAL_SECTORS:
+                    excluded_families.add(ANTHROPIC_SOURCE_FAMILY)
+                others = [
+                    m for m in cluster_map[cid]
+                    if m is not it
+                    and _source_family(m.get("source", "")) not in excluded_families
+                ]
+                others.sort(key=lambda m: _get_raw_engagement(m), reverse=True)
+                it["cluster_refs"] = [
+                    {
+                        "title": m.get("title", ""),
+                        "url": m.get("url", ""),
+                        "source": m.get("source", ""),
+                        "engagement": _get_raw_engagement(m),
+                    }
+                    for m in others
+                ]
+            else:
+                it["cluster_refs"] = []
+
+    # 8. max_score 계산 (디스플레이 정규화 앵커)
+    #    ranking은 여전히 item["final_score"] 기준. 이 값은 표시용 normalization 앵커로만 사용.
+    today_max = max((i.get("final_score", 0.0) for i in items), default=1.0) or 1.0
+    try:
+        from rolling_stats import load_rolling_stats, save_rolling_stats
+        samples = load_rolling_stats()
+        rolling_max = max((s for _, s in samples), default=today_max)
+        max_score = max(today_max, rolling_max * 0.7)
+        save_rolling_stats(samples, today_max)
+    except Exception:
+        max_score = today_max
 
     return {
-        "hot": hot_top,
-        "evergreen": ever_top,
+        "sectors": sectors_out,
         "all_scored": items,
         "clusters": clusters,
         "max_score": max_score,
@@ -516,16 +614,18 @@ def adapt_for_filter_seen(items: list[dict], max_score: float = 6.0) -> list[dic
         source = item.get("source", "")
         cross = item.get("cross_source_count", 1)
         cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
+        # 신선한 singleton은 상한을 FRESH_SINGLETON_CAP로 완화 (속보 반응성)
+        if cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
+            cap = FRESH_SINGLETON_CAP
         relative = int(item.get("final_score", 0) / max_score * 99) if max_score > 0 else 0
         score = min(cap, relative)
 
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
-        cross = item.get("cross_source_count", 1)
         if cross >= 2:
             reasons.append(f"교차 소스 {cross}곳 언급")
-        tier = item.get("matched_tier", "")
-        if tier:
-            reasons.append(tier)
+        sector = item.get("sector")
+        if sector:
+            reasons.append(f"sector:{sector}")
 
         topics.append({
             "topic": item.get("title", "")[:80],

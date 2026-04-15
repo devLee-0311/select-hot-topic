@@ -1,4 +1,4 @@
-"""AI/개발자 도구 핫토픽 & 보편 주제 선정 CLI 툴."""
+"""AI/개발자 도구 섹터별 핫토픽 & 보편 주제 선정 CLI 툴."""
 
 import argparse
 import html as html_mod
@@ -7,7 +7,6 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from math import ceil
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -15,8 +14,15 @@ from rich.console import Console
 from rich.panel import Panel
 
 from history import get_used_urls, save_topic
-from modes import HOT_CONFIG, GENERAL_CONFIG, MODES
-from pipeline import run_pipeline, adapt_for_filter_seen, DISPLAY_SCORE_CAP_BY_CROSS
+from modes import MODES, SECTOR_CONFIG
+from pipeline import (
+    DISPLAY_SCORE_CAP_BY_CROSS,
+    FRESH_SINGLETON_CAP,
+    SECTORS,
+    SECTORS_BY_KEY,
+    adapt_for_filter_seen,
+    run_sector_pipeline,
+)
 
 console = Console()
 
@@ -31,6 +37,7 @@ SOURCE_ICONS = {
     "hacker_news": "[bold yellow]HN[/]",
     "youtube": "[bold red]YouTube[/]",
     "geeknews": "[bold green]GeekNews[/]",
+    "anthropic_releases": "[bold magenta]Anthropic[/]",
 }
 
 
@@ -163,75 +170,78 @@ def format_topics_html(topics: list[dict], mode_label: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-def format_pipeline_html(result: dict, mode_label: str, max_score: float = 6.0) -> str:
-    """run_pipeline() 결과를 Telegram HTML 형식으로 변환 (hot + evergreen 2섹션)."""
+def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) -> list[str]:
+    """run_sector_pipeline() 결과를 Telegram HTML 섹터별 청크 리스트로 변환.
+
+    각 청크 = 단일 섹터의 독립적인 HTML 메시지 (자체 헤더 + 1-5개 아이템).
+    빈 섹터도 `(없음)` 플레이스홀더 청크를 포함해 반환 길이 = len(SECTORS).
+    mode_label은 하위 호환을 위해 남겨두었지만 현재 출력에는 사용하지 않는다.
+    """
+    del mode_label  # 각 청크가 독립 메시지이므로 전체 래퍼 헤더는 출력하지 않음
     esc = html_mod.escape
     NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
 
-    def render_items(items: list[dict], header: str) -> list[str]:
-        lines = [header, ""]
-        if not items:
+    sectors = result.get("sectors", {})
+    chunks: list[str] = []
+
+    for name, cfg in SECTORS:
+        emoji = cfg.get("emoji", "")
+        label = cfg.get("label", name)
+        sector_items = sectors.get(name, [])
+
+        lines: list[str] = [f"{emoji} <b>{esc(label)}</b>", ""]
+
+        if not sector_items:
             lines.append("(없음)")
-            lines.append("")
-            return lines
-        for i, item in enumerate(items, 1):
-            num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
-            title = esc(item.get("title", ""))
-            url = esc(item.get("url", ""))
-            lines.append(f"{num_emoji} <a href=\"{url}\">{title}</a>")
+        else:
+            for i, item in enumerate(sector_items, 1):
+                num_emoji = NUMBER_EMOJIS[i - 1] if i <= len(NUMBER_EMOJIS) else f"{i}."
+                title = esc(item.get("title", ""))
+                url = esc(item.get("url", ""))
+                lines.append(f"{num_emoji} <a href=\"{url}\">{title}</a>")
 
-            final_score = item.get("final_score", 0)
-            cross = item.get("cross_source_count", 1)
-            cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
-            display_score = min(cap, int(final_score / max_score * 99) if max_score > 0 else 0)
-            score_line = f"   📊 {display_score}/100"
+                final_score = item.get("final_score", 0)
+                cross = item.get("cross_source_count", 1)
+                cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
+                if cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
+                    cap = FRESH_SINGLETON_CAP
+                display_score = min(cap, int(final_score / max_score * 99) if max_score > 0 else 0)
+                score_line = f"   📊 {display_score}/100"
 
-            tier = item.get("matched_tier", "")
-            if tier in ("tier1", "tier2"):
-                tier_num = tier.replace("tier", "")
-                score_line += f"  🎯 tier{tier_num}"
+                if cross >= 2:
+                    score_line += f"  🔗 {cross} 소스"
 
-            cross = item.get("cross_source_count", 1)
-            if cross >= 2:
-                score_line += f"  🔗 {cross} 소스"
+                lines.append(score_line)
 
-            lines.append(score_line)
+                desc = item.get("description", "")
+                if desc and desc != item.get("title", ""):
+                    if len(desc) > 100:
+                        desc = desc[:97] + "..."
+                    lines.append(f"   📝 {esc(desc)}")
 
-            desc = item.get("description", "")
-            if desc and desc != item.get("title", ""):
-                if len(desc) > 100:
-                    desc = desc[:97] + "..."
-                lines.append(f"   📝 {esc(desc)}")
+                source = item.get("source", "")
+                source_label = SOURCE_ICONS.get(source, source)
+                # SOURCE_ICONS values contain rich markup; strip for HTML output
+                plain_source = re.sub(r"\[.*?\]", "", source_label).strip()
+                if plain_source:
+                    lines.append(f"   {esc(plain_source)}")
 
-            source = item.get("source", "")
-            source_label = SOURCE_ICONS.get(source, source)
-            # SOURCE_ICONS values contain rich markup; strip for HTML output
-            plain_source = re.sub(r"\[.*?\]", "", source_label).strip()
-            if plain_source:
-                lines.append(f"   {esc(plain_source)}")
+                cluster_refs = item.get("cluster_refs", [])
+                for ref in cluster_refs:
+                    ref_title = esc(ref.get("title", "")[:60])
+                    ref_url = esc(ref.get("url", ""))
+                    ref_source = esc(ref.get("source", ""))
+                    lines.append(f"   🔗 <a href=\"{ref_url}\">{ref_source}: {ref_title}</a>")
 
-            cluster_refs = item.get("cluster_refs", [])
-            for ref in cluster_refs[:3]:
-                ref_title = esc(ref.get("title", "")[:60])
-                ref_url = esc(ref.get("url", ""))
-                ref_source = esc(ref.get("source", ""))
-                lines.append(f"   🔗 <a href=\"{ref_url}\">{ref_source}: {ref_title}</a>")
+                lines.append("")
 
-            lines.append("")
-        return lines
+        text = "\n".join(lines).rstrip()
+        # Per-sector safety net only. Telegram 4096 char limit; leave headroom.
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+        chunks.append(text)
 
-    hot_items = result.get("hot", [])
-    ever_items = result.get("evergreen", [])
-
-    lines: list[str] = []
-    lines += render_items(hot_items, f"🔥 <b>{mode_label} — HOT</b>")
-    lines += render_items(ever_items, f"💡 <b>{mode_label} — EVERGREEN</b>")
-
-    text = "\n".join(lines).rstrip()
-    # Trim to 3500 char budget
-    if len(text) > 3500:
-        text = text[:3497] + "..."
-    return text
+    return chunks
 
 
 def _translate_descriptions(items: list[dict]) -> list[dict]:
@@ -283,10 +293,12 @@ def _translate_descriptions(items: list[dict]) -> list[dict]:
     return items
 
 
-def format_anthropic_html(kind: str = "all") -> str:
-    """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환.
+def _anthropic_output(kind: str = "all") -> tuple[str, list[dict]]:
+    """Anthropic 공식 블로그/뉴스를 (HTML, 선택된 items) 튜플로 반환.
 
     kind: "blog" | "news" | "all"
+
+    items는 URL/title을 포함한 raw dict 리스트로, auto-save용으로도 쓰인다.
     """
     import html as html_mod
     esc = html_mod.escape
@@ -307,7 +319,7 @@ def format_anthropic_html(kind: str = "all") -> str:
         header = "📢 <b>Anthropic 공식</b>"
 
     if not items:
-        return f"{header}\n\n데이터 없음"
+        return f"{header}\n\n데이터 없음", []
 
     items = _translate_descriptions(items)
 
@@ -326,39 +338,28 @@ def format_anthropic_html(kind: str = "all") -> str:
                     desc = desc[:117] + "..."
                 lines.append(f"  {esc(desc)}")
 
-    return "\n".join(lines)
+    return "\n".join(lines), items
+
+
+def format_anthropic_html(kind: str = "all") -> str:
+    """Anthropic 공식 블로그/뉴스를 Telegram HTML 형식으로 변환 (하위호환 래퍼)."""
+    html_out, _ = _anthropic_output(kind=kind)
+    return html_out
 
 
 def cli():
     """CLI 진입점."""
     parser = argparse.ArgumentParser(
-        description="AI/LLM 및 개발자 도구 관련 핫토픽을 수집하고 추천합니다.",
-    )
-    parser.add_argument(
-        "--count", "-n",
-        type=int,
-        default=1,
-        help="추천할 토픽 수 (기본: 1)",
-    )
-    parser.add_argument(
-        "--hot-n",
-        type=int,
-        default=None,
-        dest="hot_n",
-        help="HOT 섹션 항목 수 (지정 시 --count 비례 분할 무시)",
-    )
-    parser.add_argument(
-        "--evergreen-n",
-        type=int,
-        default=None,
-        dest="evergreen_n",
-        help="EVERGREEN 섹션 항목 수 (지정 시 --count 비례 분할 무시)",
+        description="AI/LLM 및 개발자 도구 섹터별 핫토픽을 수집하고 추천합니다.",
     )
     parser.add_argument(
         "--mode", "-m",
-        choices=["hot", "general", "anthropic"],
+        choices=["hot", "sector", "anthropic"],
         default=None,
-        help="모드 선택: hot (핫토픽), general (보편 주제), anthropic (공식 콘텐츠). 미지정시 대화형 선택.",
+        help=(
+            "모드 선택: sector/hot (섹터별 핫토픽), "
+            "anthropic (공식 콘텐츠). 미지정시 섹터 모드로 실행."
+        ),
     )
     parser.add_argument(
         "--kind",
@@ -378,6 +379,15 @@ def cli():
         dest="fmt",
         help="출력 형식: rich (기본) 또는 markdown (CI/Telegram용)",
     )
+    parser.add_argument(
+        "--auto-save",
+        action="store_true",
+        dest="auto_save",
+        help=(
+            "markdown 모드에서 출력된 모든 아이템 URL을 이력에 자동 저장 "
+            "(CI에서 사용, 인터랙티브 프롬프트 우회)."
+        ),
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -386,15 +396,28 @@ def cli():
 
     # markdown 모드에서 --mode 필수 검사
     if markdown_mode and not args.mode:
-        parser.error("--format markdown 모드에서는 --mode가 필수입니다. (hot, general, anthropic)")
+        parser.error("--format markdown 모드에서는 --mode가 필수입니다. (sector, hot, anthropic)")
 
     # anthropic 모드: 공식 콘텐츠만 출력
     if args.mode == "anthropic":
+        html_out, anth_items = _anthropic_output(kind=args.kind)
         if markdown_mode:
             sys.stdout.reconfigure(encoding="utf-8")
-            print(format_anthropic_html(kind=args.kind))
+            print(html_out)
         else:
-            console.print(format_anthropic_html(kind=args.kind))
+            console.print(html_out)
+        # auto-save: markdown 모드에서 출력된 URL들을 이력에 저장 (프롬프트 없음)
+        if markdown_mode and args.auto_save and html_out.strip() and anth_items:
+            for anth in anth_items:
+                save_topic(
+                    {
+                        "topic": anth.get("title", "")[:80],
+                        "score": 0,
+                        "reasons": [f"anthropic:{args.kind}"],
+                        "references": [{"url": anth.get("url", "")}],
+                    },
+                    mode=f"anthropic_{args.kind}",
+                )
         return
 
     # 이력 보기 모드
@@ -412,20 +435,11 @@ def cli():
             console.print()
         return
 
-    # 모드 선택
+    # 모드 선택: --mode 미지정 시 섹터 모드 기본
     if args.mode:
         mode_config = MODES[args.mode]
     else:
-        console.print()
-        console.print("[bold]모드를 선택하세요:[/]")
-        console.print("  [cyan]1[/]) 핫토픽 — 트렌딩 AI/개발 주제")
-        console.print("  [cyan]2[/]) 보편 주제 — 비개발자도 궁금한 기술 상식")
-        console.print()
-        try:
-            choice = console.input("[bold cyan]선택 (1/2): [/]").strip()
-        except EOFError:
-            choice = "1"
-        mode_config = GENERAL_CONFIG if choice == "2" else HOT_CONFIG
+        mode_config = SECTOR_CONFIG
 
     if not markdown_mode:
         console.print(
@@ -447,30 +461,21 @@ def cli():
     if not markdown_mode:
         console.print(f"\n[bold]총 {len(all_items)}개 항목 수집 완료. 분석 중...[/]\n")
 
-    # 파이프라인 설정 (hot/evergreen 개수 결정)
+    # 섹터 파이프라인 실행
     pipeline_cfg = dict(mode_config.pipeline_config)
-    if args.hot_n is not None or args.evergreen_n is not None:
-        hot_count = args.hot_n if args.hot_n is not None else 3
-        evergreen_count = args.evergreen_n if args.evergreen_n is not None else 2
-    elif args.count <= 1:
-        hot_count = 1
-        evergreen_count = 0
-    else:
-        hot_count = max(1, ceil(args.count * 0.6))
-        evergreen_count = args.count - hot_count
-    pipeline_cfg["hot_count"] = hot_count
-    pipeline_cfg["evergreen_count"] = evergreen_count
+    pipeline_result = run_sector_pipeline(all_items, pipeline_cfg)
 
-    pipeline_result = run_pipeline(all_items, pipeline_cfg)
+    # filter_seen 적용: 섹터 아이템을 flat 리스트로 변환 → 필터 → 섹터별 재분배
+    all_topics_flat: list[dict] = []
+    for name, _cfg in SECTORS:
+        all_topics_flat.extend(pipeline_result["sectors"].get(name, []))
 
-    # filter_seen 적용
-    all_topics_flat = pipeline_result["hot"] + pipeline_result["evergreen"]
     wrapped = adapt_for_filter_seen(all_topics_flat, max_score=pipeline_result.get("max_score", 6.0))
 
-    # content_type 메타데이터를 wrapped에 전달 (split 복원용)
+    # 섹터 메타데이터 전달 (재분배용)
     for i, item in enumerate(all_topics_flat):
-        wrapped[i]["_content_type"] = item.get("content_type", "hot")
         wrapped[i]["_pipeline_item"] = item
+        wrapped[i]["_sector"] = item.get("sector")
 
     wrapped = filter_seen(wrapped)
 
@@ -481,48 +486,83 @@ def cli():
             console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
-    # hot/evergreen 재분리
-    seen_hot = [w["_pipeline_item"] for w in wrapped if w.get("_content_type") == "hot"][:hot_count]
-    seen_ever = [w["_pipeline_item"] for w in wrapped if w.get("_content_type") == "evergreen"][:evergreen_count]
-    display_result = {"hot": seen_hot, "evergreen": seen_ever}
+    # 섹터별 재분배
+    display_sectors: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
+    for w in wrapped:
+        sec = w.get("_sector")
+        if sec in display_sectors:
+            display_sectors[sec].append(w["_pipeline_item"])
+
+    # 섹터별 slot 제한 적용
+    for name, cfg in SECTORS:
+        limit = cfg.get("count", 5)
+        display_sectors[name] = display_sectors[name][:limit]
+
+    display_result = {"sectors": display_sectors}
 
     if markdown_mode:
         sys.stdout.reconfigure(encoding="utf-8")
-        print(format_pipeline_html(display_result, mode_config.label, max_score=pipeline_result.get("max_score", 6.0)))
+        chunks = format_sector_html(
+            display_result,
+            mode_config.label,
+            max_score=pipeline_result.get("max_score", 6.0),
+        )
+        output = "\n@@@SECTOR_BREAK@@@\n".join(chunks)
+        print(output)
+        # auto-save: 출력된 모든 아이템의 URL을 이력에 저장 (프롬프트 없음).
+        # 파이프라인 워크플로에서 같은 주제가 다음 런에 재추천되지 않도록 dedup 용도.
+        if args.auto_save and output.strip():
+            for name, _cfg in SECTORS:
+                for item in display_sectors.get(name, []):
+                    save_topic(
+                        {
+                            "topic": item.get("title", "")[:80],
+                            "score": 0,
+                            "reasons": [f"sector:{name}"],
+                            "references": [{"url": item.get("url", "")}],
+                        },
+                        mode=mode_config.name,
+                    )
         return
 
-    # rich CLI 출력
-    all_display = seen_hot + seen_ever
-    for i, item in enumerate(all_display, 1):
-        ctype = item.get("content_type", "hot")
-        badge = "[🔥 HOT]" if ctype == "hot" else "[💡 EVERGREEN]"
-        # wrap as legacy topic shape for display_topic
-        raw_eng = item.get("engagement", 0)
-        source = item.get("source", "")
-        _cross = item.get("cross_source_count", 1)
-        _cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(_cross, 5), 99)
-        _max = pipeline_result.get("max_score", 6.0)
-        score = min(_cap, int(item.get("final_score", 0) / _max * 99) if _max > 0 else 0)
-        reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
-        cross = item.get("cross_source_count", 1)
-        if cross >= 2:
-            reasons.append(f"교차 소스 {cross}곳 언급")
-        tier = item.get("matched_tier", "")
-        if tier:
-            reasons.append(tier)
-        legacy_topic = {
-            "topic": f"{badge} {item.get('title', '')}"[:80],
-            "description": item.get("description", ""),
-            "score": score,
-            "reasons": reasons,
-            "references": [{
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "source": source,
-                "engagement": raw_eng,
-            }],
-        }
-        display_topic(legacy_topic, rank=i)
+    # rich CLI 출력: 섹터별로 구분자와 함께 출력
+    _max = pipeline_result.get("max_score", 6.0)
+    rank = 0
+    for name, cfg in SECTORS:
+        sector_items = display_sectors.get(name, [])
+        if not sector_items:
+            continue
+        emoji = cfg.get("emoji", "")
+        label = cfg.get("label", name)
+        console.print()
+        console.print(f"[bold cyan]{emoji} {label}[/]")
+        console.print()
+        for item in sector_items:
+            rank += 1
+            raw_eng = item.get("engagement", 0)
+            source = item.get("source", "")
+            _cross = item.get("cross_source_count", 1)
+            _cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(_cross, 5), 99)
+            if _cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
+                _cap = FRESH_SINGLETON_CAP
+            score = min(_cap, int(item.get("final_score", 0) / _max * 99) if _max > 0 else 0)
+            reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
+            if _cross >= 2:
+                reasons.append(f"교차 소스 {_cross}곳 언급")
+            reasons.append(f"sector:{name}")
+            legacy_topic = {
+                "topic": f"[{emoji} {SECTORS_BY_KEY[name]['label']}] {item.get('title', '')}"[:80],
+                "description": item.get("description", ""),
+                "score": score,
+                "reasons": reasons,
+                "references": [{
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "source": source,
+                    "engagement": raw_eng,
+                }],
+            }
+            display_topic(legacy_topic, rank=rank)
 
     # 이력 저장 확인
     console.print()

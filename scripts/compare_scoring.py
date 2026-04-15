@@ -1,4 +1,4 @@
-"""Side-by-side A/B comparison: legacy score_topics vs new run_pipeline."""
+"""Side-by-side A/B comparison: legacy score_topics vs new run_sector_pipeline."""
 
 import argparse
 import sys
@@ -16,24 +16,24 @@ from dotenv import load_dotenv
 from main import collect_all
 from modes import MODES
 from scorer import score_topics
-from pipeline import run_pipeline
+from pipeline import SECTORS, run_sector_pipeline
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="A/B compare legacy score_topics vs new run_pipeline",
+        description="A/B compare legacy score_topics vs new run_sector_pipeline",
     )
     parser.add_argument(
         "--mode",
-        choices=["hot", "general"],
+        choices=["sector", "hot"],
         required=True,
-        help="Mode to run: hot or general",
+        help="Mode to run: sector (or its alias hot)",
     )
     parser.add_argument(
         "--top",
         type=int,
         default=5,
-        help="Number of top results to show (default: 5)",
+        help="Number of top results for legacy scorer (default: 5)",
     )
     parser.add_argument(
         "--no-fetch",
@@ -59,11 +59,9 @@ def main() -> None:
     # ── Legacy ───────────────────────────────────────────────
     legacy_topics = score_topics(all_items, top_n=top, weights=mode_config.scorer_weights)
 
-    # ── New pipeline ─────────────────────────────────────────
-    pipeline_cfg = dict(mode_config.pipeline_config)
-    pipeline_cfg["hot_count"] = top
-    pipeline_cfg["evergreen_count"] = top
-    pipeline_result = run_pipeline(all_items, pipeline_cfg)
+    # ── New sector pipeline ──────────────────────────────────
+    pipeline_result = run_sector_pipeline(all_items, dict(mode_config.pipeline_config))
+    sectors_out = pipeline_result.get("sectors", {})
 
     # ── Print legacy ─────────────────────────────────────────
     print(f"\n=== LEGACY (score_topics) — top {top} ===")
@@ -76,45 +74,37 @@ def main() -> None:
         print(f"{i}. {t['topic']} (score={score})")
         print(f"   URL: {url}")
 
-    # ── Print new pipeline hot ────────────────────────────────
-    hot_items = pipeline_result.get("hot", [])
-    print("\n=== NEW PIPELINE — HOT ===")
-    if not hot_items:
-        print("  (no results)")
-    for i, item in enumerate(hot_items, 1):
-        final_score = item.get("final_score", 0)
-        tier = item.get("matched_tier", "?")
-        cross = item.get("cross_source_count", 1)
-        url = item.get("url", "")
-        title = item.get("title", "")
-        print(f"{i}. {title} (final_score={final_score:.2f}, tier={tier}, cross={cross})")
-        print(f"   URL: {url}")
-
-    # ── Print new pipeline evergreen ─────────────────────────
-    ever_items = pipeline_result.get("evergreen", [])
-    print("\n=== NEW PIPELINE — EVERGREEN ===")
-    if not ever_items:
-        print("  (no results)")
-    for i, item in enumerate(ever_items, 1):
-        final_score = item.get("final_score", 0)
-        tier = item.get("matched_tier", "?")
-        cross = item.get("cross_source_count", 1)
-        url = item.get("url", "")
-        title = item.get("title", "")
-        print(f"{i}. {title} (final_score={final_score:.2f}, tier={tier}, cross={cross})")
-        print(f"   URL: {url}")
+    # ── Print new pipeline — sectors ─────────────────────────
+    print("\n=== NEW PIPELINE — SECTORS ===")
+    for name, cfg in SECTORS:
+        sector_items = sectors_out.get(name, [])
+        label = cfg.get("label", name)
+        print(f"\n[{name}] {label} ({len(sector_items)})")
+        if not sector_items:
+            print("  (no results)")
+            continue
+        for i, item in enumerate(sector_items, 1):
+            final_score = item.get("final_score", 0)
+            cross = item.get("cross_source_count", 1)
+            url = item.get("url", "")
+            title = item.get("title", "")
+            print(f"{i}. {title} (final_score={final_score:.2f}, cross={cross})")
+            print(f"   URL: {url}")
 
     # ── Overlap analysis ─────────────────────────────────────
     legacy_urls = set()
     for t in legacy_topics:
         for ref in t.get("references", []):
-            legacy_urls.add(ref["url"])
+            url = ref.get("url", "")
+            if url:
+                legacy_urls.add(url)
 
-    new_urls = set()
-    for item in hot_items + ever_items:
-        url = item.get("url", "")
-        if url:
-            new_urls.add(url)
+    new_urls: set[str] = set()
+    for sector_items in sectors_out.values():
+        for item in sector_items:
+            url = item.get("url", "")
+            if url:
+                new_urls.add(url)
 
     both = legacy_urls & new_urls
     only_legacy = legacy_urls - new_urls
@@ -124,20 +114,31 @@ def main() -> None:
     print(f"URLs in both: {len(both)}")
     print(f"URLs only in legacy: {len(only_legacy)}", end="")
     if only_legacy:
-        sample = list(only_legacy)[:3]
         print()
-        for u in sample:
+        for u in list(only_legacy)[:3]:
             print(f"  {u}")
     else:
         print()
-    print(f"URLs only in new: {len(only_new)}", end="")
+    print(f"URLs only in new (any sector): {len(only_new)}", end="")
     if only_new:
-        sample = list(only_new)[:3]
         print()
-        for u in sample:
+        for u in list(only_new)[:3]:
             print(f"  {u}")
     else:
         print()
+
+    # ── Per-sector stats ─────────────────────────────────────
+    print("\n=== PER-SECTOR STATS ===")
+    for name, cfg in SECTORS:
+        sector_items = sectors_out.get(name, [])
+        n = len(sector_items)
+        cap = cfg.get("count", 5)
+        if n == 0:
+            print(f"{name}: 0 items")
+            continue
+        avg = sum(it.get("final_score", 0.0) for it in sector_items) / n
+        suffix = "  (under cap — sparse)" if n < cap else ""
+        print(f"{name}: {n} items, avg final_score={avg:.2f}{suffix}")
 
 
 if __name__ == "__main__":

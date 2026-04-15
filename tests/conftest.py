@@ -5,6 +5,33 @@ import time
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_rolling_stats(tmp_path, monkeypatch):
+    """Redirect rolling_stats file IO to tmp_path to avoid polluting the worktree.
+
+    Without this, pipeline tests that call run_sector_pipeline would write a
+    real score_stats.json into the project root on every run. Tests that need
+    specific rolling state override the monkeypatch explicitly.
+    """
+    import rolling_stats as rs
+
+    stats_path = tmp_path / "score_stats.json"
+    orig_load = rs.load_rolling_stats
+    orig_save = rs.save_rolling_stats
+
+    def _load(path=None):
+        # Tests that pass an explicit path (e.g. test_rolling_stats.py) bypass redirect.
+        return orig_load(path=str(stats_path)) if path is None else orig_load(path=path)
+
+    def _save(samples, today_max, path=None, keep_days=7):
+        target = str(stats_path) if path is None else path
+        return orig_save(samples, today_max, path=target, keep_days=keep_days)
+
+    monkeypatch.setattr(rs, "load_rolling_stats", _load)
+    monkeypatch.setattr(rs, "save_rolling_stats", _save)
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -105,40 +132,3 @@ def sample_items_single_source():
         _item("Machine learning transformer architecture", source="reddit_localllama", engagement=40, created=now - 14400),
         _item("RAG embedding vector database setup", source="reddit_localllama", engagement=50, created=now - 18000),
     ]
-
-
-# ---------------------------------------------------------------------------
-# Single-item tier fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def sample_tier1_item():
-    """Single item whose title contains a tier1 keyword."""
-    return _item(
-        "Claude code new feature release",
-        source="hacker_news",
-        engagement=0,
-        url="https://hn.example.com/claude-code",
-    )
-
-
-@pytest.fixture
-def sample_tier2_item():
-    """Single item whose title contains a tier2 keyword (cursor)."""
-    return _item(
-        "Cursor IDE tab completion update",
-        source="hacker_news",
-        engagement=5,  # below hackernews threshold of 10
-        url="https://hn.example.com/cursor-update",
-    )
-
-
-@pytest.fixture
-def sample_tier3_item():
-    """Single item whose title contains a tier3 keyword (llm)."""
-    return _item(
-        "LLM inference optimization techniques",
-        source="reddit_localllama",
-        engagement=100,
-        url="https://reddit.com/r/localllama/llm-inference",
-    )

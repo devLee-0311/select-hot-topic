@@ -5,3 +5,16 @@ __pycache__/
 dist/
 build/
 .venv/
+
+# Runtime state
+score_stats.json
+history.json
+
+# CI artifacts / local debug output
+chunk_*.txt
+sector_full.txt
+*.tmpbkp
+
+# Tooling state
+.claude/
+.omc/

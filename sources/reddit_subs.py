@@ -63,23 +63,3 @@ def fetch_reddit_openai() -> list[dict]:
 def fetch_reddit_programming() -> list[dict]:
     """Reddit r/programming 핫글 수집."""
     return _fetch_subreddit("programming")
-
-
-def fetch_reddit_technology() -> list[dict]:
-    """Reddit r/technology 핫글 수집."""
-    return _fetch_subreddit("technology")
-
-
-def fetch_reddit_eli5() -> list[dict]:
-    """Reddit r/explainlikeimfive 핫글 수집."""
-    return _fetch_subreddit("explainlikeimfive")
-
-
-def fetch_reddit_technology_filtered(keywords: list[str]) -> list[dict]:
-    """Reddit r/technology 핫글을 키워드 필터링하여 수집."""
-    return _fetch_subreddit("technology", limit=50, keywords=keywords)
-
-
-def fetch_reddit_eli5_filtered(keywords: list[str]) -> list[dict]:
-    """Reddit r/explainlikeimfive 핫글을 키워드 필터링하여 수집."""
-    return _fetch_subreddit("explainlikeimfive", limit=50, keywords=keywords)

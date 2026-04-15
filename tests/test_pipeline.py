@@ -1,4 +1,4 @@
-"""Unit and integration tests for pipeline.py.
+"""Unit and integration tests for pipeline.py (pillar sector model).
 
 All data is synthetic — no network calls.
 Each test verifies exactly one behavior.
@@ -7,123 +7,259 @@ Each test verifies exactly one behavior.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 
 import pytest
 
 from pipeline import (
+    CLUSTER_NOISE_HARD_EXCLUDE,
+    CROSS_SOURCE_BOOST,
+    FRESH_SINGLETON_CAP,
     NON_ANCHOR_SOURCES,
+    NON_OFFICIAL_SECTORS,
+    RECENCY_BUCKETS,
+    SECTOR_CLUSTER_NOISE,
+    SECTORS,
+    _parse_hours_since,
+    _recency_multiplier,
+    _titles_cluster,
     adapt_for_filter_seen,
-    classify_content_type,
-    compute_final_scores,
+    assign_sector,
+    compute_sector_scores,
     detect_clusters,
     normalize_engagement,
-    run_pipeline,
-    tag_tiers,
+    run_sector_pipeline,
 )
 
 
 # ===========================================================================
-# tag_tiers
+# assign_sector — pillar routing (claude_code / agents / local_llm / ai_infra)
 # ===========================================================================
 
 
-def test_tag_tiers_tier1_passes_low_engagement(sample_tier1_item):
-    """tier1 item (contains 'claude') with engagement=0 is kept and tagged tier1."""
-    result = tag_tiers([sample_tier1_item])
-    assert len(result) == 1
-    assert result[0]["matched_tier"] == "tier1"
-
-
-def test_tag_tiers_tier2_below_threshold_dropped(sample_tier2_item):
-    """tier2 item (contains 'cursor') below hackernews threshold (10) is dropped."""
-    # engagement=5, hackernews threshold=10 → should be dropped
-    result = tag_tiers([sample_tier2_item])
-    assert len(result) == 0
-
-
-def test_tag_tiers_tier3_cross_source_kept():
-    """tier3 item is kept when it has a cross-source counterpart with similar title."""
-    # Two items with the same topic from different source families
-    item_a = {
-        "title": "LLM inference optimization techniques",
+def test_assign_sector_claude_code_keyword():
+    """Item with 'claude code' keyword routes to claude_code sector."""
+    item = {
+        "title": "Claude Code power-user tips",
         "source": "hacker_news",
-        "engagement": 1,
-        "url": "https://hn.example.com/llm-inference",
+        "url": "https://hn.example.com/claude-code",
         "description": "",
     }
-    item_b = {
-        "title": "LLM inference optimization techniques",
-        "source": "reddit_localllama",
-        "engagement": 1,
-        "url": "https://reddit.com/llm-inference",
-        "description": "",
-    }
-    result = tag_tiers([item_a, item_b])
-    # Both should survive because each has a cross-source counterpart
-    assert any(it["matched_tier"] == "tier3" for it in result)
+    assert assign_sector(item) == "claude_code"
 
 
-def test_tag_tiers_tier3_low_percentile_dropped():
-    """tier3 item alone in batch with low engagement is dropped (no cross-source, not top10)."""
+def test_assign_sector_mcp_routes_to_claude_code():
+    """Item with 'mcp' keyword routes to claude_code sector."""
     item = {
-        "title": "LLM inference optimization techniques",
-        "source": "reddit_localllama",
-        "engagement": 1,
-        "url": "https://reddit.com/llm-inference",
+        "title": "Model Context Protocol explainer",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/mcp-article",
         "description": "",
     }
-    # Batch: this item + 9 high-engagement items with titles that share no stems
-    # with "LLM inference optimization techniques" (verified similarity < 0.4 each)
-    filler_titles = [
-        "Weekend hiking trail review",
-        "Baking sourdough bread recipe",
-        "Stock market quarterly earnings",
-        "Ocean swimming safety tips",
-        "Gardening tomato planting calendar",
-        "Chess opening strategy endgame",
-        "Knitting wool sweater pattern",
-        "Astronomy telescope stargazing guide",
-        "Vintage car restoration bodywork",
-    ]
-    high_items = [
-        {
-            "title": title,
-            "source": "hacker_news",
-            "engagement": 1000 * (i + 1),
-            "url": f"https://hn.example.com/filler-{i}",
-            "description": "",
-        }
-        for i, title in enumerate(filler_titles)
-    ]
-    result = tag_tiers([item] + high_items)
-    # The tier3 item should be dropped; high items have no tier keywords so also dropped
-    tier3_items = [it for it in result if it.get("matched_tier") == "tier3"]
-    assert len(tier3_items) == 0
+    assert assign_sector(item) == "claude_code"
 
 
-def test_tag_tiers_no_match_dropped():
-    """Item with no tier keyword is excluded from result."""
+def test_assign_sector_subagent_routes_to_claude_code():
+    """'subagent' keyword routes to claude_code sector."""
     item = {
-        "title": "Weekend hiking trip report",
+        "title": "Subagent design patterns",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/subagent",
+        "description": "",
+    }
+    assert assign_sector(item) == "claude_code"
+
+
+def test_assign_sector_langgraph_routes_agents():
+    """'langgraph' keyword routes to agents sector."""
+    item = {
+        "title": "LangGraph tutorial for multi-step reasoning",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/langgraph",
+        "description": "",
+    }
+    assert assign_sector(item) == "agents"
+
+
+def test_assign_sector_cursor_codex_routes_ai_infra():
+    """'cursor' or 'codex' route to ai_infra sector."""
+    cursor_item = {
+        "title": "Cursor adds codex mode",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/cursor-codex",
+        "description": "",
+    }
+    assert assign_sector(cursor_item) == "ai_infra"
+
+    codex_item = {
+        "title": "GPT-5 Codex release notes",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/codex",
+        "description": "",
+    }
+    assert assign_sector(codex_item) == "ai_infra"
+
+
+def test_assign_sector_openai_routes_to_ai_infra():
+    """Item with 'openai' keyword (no claude code / agents) routes to ai_infra sector."""
+    item = {
+        "title": "OpenAI new feature",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/openai",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_infra"
+
+
+def test_assign_sector_ollama_routes_local_llm():
+    """'ollama' keyword routes to local_llm sector."""
+    item = {
+        "title": "Ollama guide for beginners",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/ollama",
+        "description": "",
+    }
+    assert assign_sector(item) == "local_llm"
+
+
+def test_assign_sector_llamacpp_routes_local_llm():
+    """'llama.cpp' keyword routes to local_llm sector."""
+    item = {
+        "title": "llama.cpp performance tips",
+        "source": "reddit_localllama",
+        "url": "https://reddit.com/localllama",
+        "description": "",
+    }
+    assert assign_sector(item) == "local_llm"
+
+
+def test_assign_sector_claude_code_wins_over_agents():
+    """'Claude Code agent SDK announced' → claude_code (priority order, not agents)."""
+    item = {
+        "title": "Claude Code agent SDK announced",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/claude-code-agent-sdk",
+        "description": "",
+    }
+    assert assign_sector(item) == "claude_code"
+
+
+def test_assign_sector_deny_excludes_claude_code_from_agents():
+    """'Claude Code agentic workflow' has both 'claude code' AND 'agentic'.
+
+    Priority says claude_code wins (not agents). The `deny: ['claude code']` on agents
+    is a safety net — even if priority were skipped, agents must not claim this item.
+    """
+    item = {
+        "title": "Claude Code agentic workflow deep dive",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/claude-code-agentic",
+        "description": "",
+    }
+    assert assign_sector(item) == "claude_code"
+
+
+def test_assign_sector_anthropic_releases_news_url():
+    """source=anthropic_releases with /news/ URL routes to anthropic_news."""
+    item = {
+        "title": "New announcement",
+        "source": "anthropic_releases",
+        "url": "https://www.anthropic.com/news/some-announcement",
+        "description": "",
+    }
+    assert assign_sector(item) == "anthropic_news"
+
+
+def test_assign_sector_anthropic_releases_blog_url():
+    """source=anthropic_releases with claude.com/blog URL routes to anthropic_blog."""
+    item = {
+        "title": "New blog post",
+        "source": "anthropic_releases",
+        "url": "https://claude.com/blog/some-post",
+        "description": "",
+    }
+    assert assign_sector(item) == "anthropic_blog"
+
+
+def test_assign_sector_no_match_returns_none():
+    """Item with no matching pillar keyword → None (dropped)."""
+    item = {
+        "title": "Weekend hiking trail review",
         "source": "reddit_hiking",
-        "engagement": 999,
-        "url": "https://reddit.com/r/hiking/trip-report",
+        "url": "https://reddit.com/r/hiking/x",
         "description": "",
     }
-    result = tag_tiers([item])
-    assert len(result) == 0
+    assert assign_sector(item) is None
 
 
-def test_tag_tiers_skip_tiering_all_pass_tier2():
-    """skip_tiering=True gives all items matched_tier='tier2' regardless of keywords."""
-    items = [
-        {"title": "Weekend hiking trip", "source": "reddit", "engagement": 0, "url": "u1", "description": ""},
-        {"title": "Claude new model", "source": "hacker_news", "engagement": 0, "url": "u2", "description": ""},
-        {"title": "Random news story", "source": "geeknews", "engagement": 0, "url": "u3", "description": ""},
-    ]
-    result = tag_tiers(items, skip_tiering=True)
-    assert len(result) == 3
-    assert all(it["matched_tier"] == "tier2" for it in result)
+# ===========================================================================
+# Recency buckets
+# ===========================================================================
+
+
+def _item_with_created(hours_ago: float) -> dict:
+    return {
+        "title": "Test item",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/test",
+        "description": "",
+        "created": time.time() - hours_ago * 3600,
+    }
+
+
+def test_recency_bucket_fresh_1_3x():
+    """Item 2h old → multiplier 1.30."""
+    item = _item_with_created(2.0)
+    assert _recency_multiplier(item) == pytest.approx(1.30, rel=1e-3)
+
+
+def test_recency_bucket_day_old_1_0x():
+    """Item 20h old → multiplier 1.00."""
+    item = _item_with_created(20.0)
+    assert _recency_multiplier(item) == pytest.approx(1.00, rel=1e-3)
+
+
+def test_recency_bucket_three_days_0_7x():
+    """Item 50h old → multiplier 0.70."""
+    item = _item_with_created(50.0)
+    assert _recency_multiplier(item) == pytest.approx(0.70, rel=1e-3)
+
+
+def test_recency_bucket_old_0_4x():
+    """Item 200h old → multiplier 0.40."""
+    item = _item_with_created(200.0)
+    assert _recency_multiplier(item) == pytest.approx(0.40, rel=1e-3)
+
+
+def test_recency_bucket_unknown_age_neutral():
+    """Item with no timestamp field → multiplier 1.0 (neutral, not penalized)."""
+    item = {
+        "title": "Timeless item",
+        "source": "github_trending",
+        "url": "https://github.com/example",
+        "description": "",
+    }
+    assert _recency_multiplier(item) == pytest.approx(1.0, rel=1e-3)
+
+
+def test_recency_parses_published_at_datetime():
+    """Anthropic-style `published_at=datetime(...)` is parsed into hours_since."""
+    item = {
+        "title": "Anthropic blog post",
+        "source": "anthropic_releases",
+        "url": "https://claude.com/blog/x",
+        "description": "",
+        "published_at": datetime.now() - timedelta(hours=3),
+    }
+    hours = _parse_hours_since(item)
+    assert hours is not None
+    assert 2.5 <= hours <= 3.5
+
+
+def test_recency_buckets_constant_shape():
+    """RECENCY_BUCKETS has the expected (max_hours, mult) shape terminating with None."""
+    assert RECENCY_BUCKETS[-1][0] is None
+    assert all(isinstance(b[1], (int, float)) for b in RECENCY_BUCKETS)
 
 
 # ===========================================================================
@@ -138,8 +274,7 @@ def test_detect_clusters_url_match():
         {"title": "Article about AI", "source": "hacker_news", "engagement": 10, "url": shared_url, "description": ""},
         {"title": "Article about AI discussion", "source": "reddit_localllama", "engagement": 20, "url": shared_url, "description": ""},
     ]
-    tagged = [dict(it, matched_tier="tier1") for it in items]
-    result_items, clusters = detect_clusters(tagged)
+    result_items, _clusters = detect_clusters(items)
     assert result_items[0]["cluster_id"] == result_items[1]["cluster_id"]
     assert result_items[0]["cross_source_boost"] == 1.5
     assert result_items[1]["cross_source_boost"] == 1.5
@@ -151,8 +286,7 @@ def test_detect_clusters_title_similarity():
         {"title": "Claude model context protocol deep dive", "source": "hacker_news", "engagement": 50, "url": "https://hn.example.com/mcp", "description": ""},
         {"title": "Claude model context protocol deep dive review", "source": "reddit_localllama", "engagement": 30, "url": "https://reddit.com/mcp", "description": ""},
     ]
-    tagged = [dict(it, matched_tier="tier1") for it in items]
-    result_items, clusters = detect_clusters(tagged)
+    result_items, _clusters = detect_clusters(items)
     assert result_items[0]["cluster_id"] is not None
     assert result_items[0]["cluster_id"] == result_items[1]["cluster_id"]
 
@@ -165,26 +299,10 @@ def test_detect_clusters_3_sources_boost_2_5():
         {"title": "Big AI story", "source": "reddit_localllama", "engagement": 80, "url": shared_url, "description": ""},
         {"title": "Big AI story", "source": "github_trending", "engagement": 60, "url": shared_url, "description": ""},
     ]
-    tagged = [dict(it, matched_tier="tier1") for it in items]
-    result_items, clusters = detect_clusters(tagged)
+    result_items, _clusters = detect_clusters(items)
     for it in result_items:
         assert it["cross_source_count"] == 3
         assert it["cross_source_boost"] == 2.5
-
-
-def test_detect_clusters_4_plus_sources_boost_4_0():
-    """4+ items from 4 different source families get cross_source_boost=4.0."""
-    shared_url = "https://example.com/quad-story"
-    items = [
-        {"title": "Viral AI story", "source": "hacker_news", "engagement": 200, "url": shared_url, "description": ""},
-        {"title": "Viral AI story", "source": "reddit_localllama", "engagement": 150, "url": shared_url, "description": ""},
-        {"title": "Viral AI story", "source": "github_trending", "engagement": 100, "url": shared_url, "description": ""},
-        {"title": "Viral AI story", "source": "youtube", "engagement": 50, "url": shared_url, "description": ""},
-    ]
-    tagged = [dict(it, matched_tier="tier1") for it in items]
-    result_items, clusters = detect_clusters(tagged)
-    for it in result_items:
-        assert it["cross_source_boost"] == 4.0
 
 
 def test_detect_clusters_singletons_boost_1():
@@ -193,10 +311,71 @@ def test_detect_clusters_singletons_boost_1():
         {"title": "Claude AI assistant news", "source": "hacker_news", "engagement": 10, "url": "https://hn.example.com/claude", "description": ""},
         {"title": "Python async programming guide", "source": "reddit_python", "engagement": 20, "url": "https://reddit.com/python-async", "description": ""},
     ]
-    tagged = [dict(it, matched_tier="tier1") for it in items]
-    result_items, _ = detect_clusters(tagged)
+    result_items, _ = detect_clusters(items)
     for it in result_items:
         assert it["cross_source_boost"] == 1.0
+
+
+# ===========================================================================
+# _titles_cluster (sector noise filtering)
+# ===========================================================================
+
+
+def test_titles_cluster_excludes_sector_keywords():
+    """Regression: items sharing only sector-routing keywords (claude, code) must NOT cluster."""
+    assert not _titles_cluster(
+        "Claude Code Routines",
+        "How and when to use subagents in Claude Code",
+    )
+
+
+def test_titles_cluster_real_cluster_still_detected():
+    """Real clusters must still be detected after noise stripping.
+
+    Both titles share 'subagents' + 'feature' and have high similarity after noise is stripped.
+    """
+    assert _titles_cluster(
+        "Claude Code adds new subagents feature",
+        "Claude Code subagents feature released",
+    )
+
+
+def test_sector_cluster_noise_built_correctly():
+    """SECTOR_CLUSTER_NOISE contains per-sector routing keywords split into tokens."""
+    # Claude Code pillar tokens that remain noise after hard-exclude filter
+    assert "claude" in SECTOR_CLUSTER_NOISE
+    assert "code" in SECTOR_CLUSTER_NOISE
+    assert "model" in SECTOR_CLUSTER_NOISE
+    # Local LLM pillar tokens
+    assert "ollama" in SECTOR_CLUSTER_NOISE
+    assert "mistral" in SECTOR_CLUSTER_NOISE
+    # AI infra pillar tokens
+    assert "cursor" in SECTOR_CLUSTER_NOISE
+    assert "openai" in SECTOR_CLUSTER_NOISE
+
+
+def test_sector_cluster_noise_excludes_hard_exclude_tokens():
+    """CLUSTER_NOISE_HARD_EXCLUDE words are NOT added to SECTOR_CLUSTER_NOISE.
+
+    They remain as cluster signal because they're too topic-bearing to lose.
+    """
+    for w in CLUSTER_NOISE_HARD_EXCLUDE:
+        assert w not in SECTOR_CLUSTER_NOISE, (
+            f"{w!r} should be hard-excluded from noise set"
+        )
+    # spot-check specific words
+    assert "agent" not in SECTOR_CLUSTER_NOISE
+    assert "codex" not in SECTOR_CLUSTER_NOISE
+    assert "mcp" not in SECTOR_CLUSTER_NOISE
+    assert "skills" not in SECTOR_CLUSTER_NOISE
+
+
+def test_sector_cluster_noise_excludes_generic_words():
+    """SECTOR_CLUSTER_NOISE must not contain generic topic-bearing words."""
+    assert "routin" not in SECTOR_CLUSTER_NOISE
+    assert "routine" not in SECTOR_CLUSTER_NOISE
+    assert "releas" not in SECTOR_CLUSTER_NOISE
+    assert "release" not in SECTOR_CLUSTER_NOISE
 
 
 # ===========================================================================
@@ -205,9 +384,8 @@ def test_detect_clusters_singletons_boost_1():
 
 
 def test_normalize_engagement_rank_within_source(sample_items_single_source):
-    """5 reddit items with engagement [10,20,30,40,50] → normalized values are monotonically increasing in [0,1]."""
+    """5 reddit items with engagement [10,20,30,40,50] → normalized values are monotonically increasing."""
     result = normalize_engagement(sample_items_single_source)
-    # Sort by original engagement to check monotonicity
     sorted_by_eng = sorted(result, key=lambda x: x["engagement"])
     norms = [it["engagement_normalized"] for it in sorted_by_eng]
     assert all(0.0 <= v <= 1.0 for v in norms)
@@ -228,7 +406,6 @@ def test_normalize_engagement_small_N_default():
 def test_normalize_engagement_youtube_uses_views():
     """YouTube items use 'views' not 'engagement' for ranking."""
     items = [
-        # High views, low engagement → should rank high
         {"title": "Popular video", "source": "youtube", "engagement": 10, "views": 100000, "url": "u1", "description": ""},
         {"title": "Unpopular video A", "source": "youtube", "engagement": 500, "views": 100, "url": "u2", "description": ""},
         {"title": "Unpopular video B", "source": "youtube", "engagement": 600, "views": 200, "url": "u3", "description": ""},
@@ -238,7 +415,6 @@ def test_normalize_engagement_youtube_uses_views():
     result = normalize_engagement(items)
     popular = next(it for it in result if it["title"] == "Popular video")
     others = [it for it in result if it["title"] != "Popular video"]
-    # Popular video has highest views → highest engagement_normalized
     assert all(popular["engagement_normalized"] >= it["engagement_normalized"] for it in others)
 
 
@@ -255,113 +431,16 @@ def test_normalize_engagement_never_mutates_engagement():
 
 
 # ===========================================================================
-# classify_content_type
-# ===========================================================================
-
-
-def _make_classified_item(**kwargs) -> dict:
-    """Build a minimal item ready for classify_content_type (needs engagement_normalized, cross_source_count)."""
-    base = {
-        "title": kwargs.get("title", "Test item"),
-        "source": kwargs.get("source", "hacker_news"),
-        "engagement": kwargs.get("engagement", 0),
-        "url": kwargs.get("url", "https://example.com/test"),
-        "description": kwargs.get("description", ""),
-        "engagement_normalized": kwargs.get("engagement_normalized", 0.5),
-        "cross_source_count": kwargs.get("cross_source_count", 1),
-        "cross_source_boost": kwargs.get("cross_source_boost", 1.0),
-        "matched_tier": kwargs.get("matched_tier", "tier2"),
-    }
-    for field in ("created", "published", "views"):
-        if field in kwargs:
-            base[field] = kwargs[field]
-    return base
-
-
-def test_classify_hot_signal_keyword():
-    """Item with 'release' in title is classified as hot regardless of age."""
-    item = _make_classified_item(
-        title="New model release announcement",
-        engagement_normalized=0.1,
-        cross_source_count=1,
-    )
-    result = classify_content_type([item])
-    assert result[0]["content_type"] == "hot"
-
-
-def test_classify_evergreen_signal_keyword():
-    """Item with 'tutorial' in title is classified as evergreen."""
-    item = _make_classified_item(
-        title="Complete tutorial for beginners",
-        engagement_normalized=0.1,
-        cross_source_count=1,
-    )
-    result = classify_content_type([item])
-    assert result[0]["content_type"] == "evergreen"
-
-
-def test_classify_recent_high_engagement_hot():
-    """Item created 1 hour ago with engagement_normalized=0.9 is classified as hot."""
-    now = time.time()
-    item = _make_classified_item(
-        title="Breaking news item",
-        engagement_normalized=0.9,
-        cross_source_count=1,
-        created=now - 3600,  # 1 hour ago
-    )
-    result = classify_content_type([item])
-    assert result[0]["content_type"] == "hot"
-
-
-def test_classify_old_moderate_engagement_evergreen():
-    """Item created 5 days ago with engagement_normalized=0.6 is classified as evergreen."""
-    now = time.time()
-    item = _make_classified_item(
-        title="In-depth comparison of frameworks",
-        engagement_normalized=0.6,
-        cross_source_count=1,
-        created=now - 5 * 24 * 3600,  # 5 days ago
-    )
-    result = classify_content_type([item])
-    assert result[0]["content_type"] == "evergreen"
-
-
-def test_classify_no_timestamp_defaults():
-    """Item with no created/published field gets hours_since_published=None; not forced to hot with low engagement and no cross-source."""
-    item = _make_classified_item(
-        title="Some neutral item",
-        engagement_normalized=0.2,
-        cross_source_count=1,
-    )
-    result = classify_content_type([item])
-    assert result[0]["hours_since_published"] is None
-    # Low engagement (0.2 < 0.5) and no cross-source → should be evergreen, not hot
-    assert result[0]["content_type"] == "evergreen"
-
-
-def test_classify_youtube_published_parsed():
-    """YouTube item with published='2 days ago' is parsed to ~48 hours."""
-    item = _make_classified_item(
-        title="YouTube tutorial video",
-        source="youtube",
-        engagement_normalized=0.5,
-        cross_source_count=1,
-        published="2 days ago",
-    )
-    result = classify_content_type([item])
-    hours = result[0]["hours_since_published"]
-    assert hours is not None
-    assert 47 <= hours <= 49, f"Expected ~48 hours, got {hours}"
-
-
-# ===========================================================================
-# compute_final_scores
+# compute_sector_scores
 # ===========================================================================
 
 
 def _make_scored_item(**kwargs) -> dict:
-    """Build a minimal item ready for compute_final_scores."""
-    return {
+    """Build a minimal item ready for compute_sector_scores.
+
+    By default does NOT include a timestamp → neutral 1.0 recency multiplier.
+    """
+    out = {
         "title": kwargs.get("title", "Test item"),
         "source": kwargs.get("source", "hacker_news"),
         "engagement": kwargs.get("engagement", 0),
@@ -370,139 +449,247 @@ def _make_scored_item(**kwargs) -> dict:
         "engagement_normalized": kwargs.get("engagement_normalized", 0.5),
         "cross_source_count": kwargs.get("cross_source_count", 1),
         "cross_source_boost": kwargs.get("cross_source_boost", 1.0),
-        "matched_tier": kwargs.get("matched_tier", "tier2"),
-        "content_type": kwargs.get("content_type", "hot"),
-        "hours_since_published": kwargs.get("hours_since_published", None),
     }
+    for field in ("created", "created_utc", "published", "published_at"):
+        if field in kwargs:
+            out[field] = kwargs[field]
+    return out
 
 
-def test_final_score_tier1_floor():
-    """tier1 item with engagement_normalized=0.01 still scores >= floor.
-
-    Expected minimum: max(0.01, 0.1) * 1.5 * 1.0 = 0.15
-    """
-    item = _make_scored_item(
-        matched_tier="tier1",
-        engagement_normalized=0.01,
-        cross_source_boost=1.0,
-        content_type="evergreen",  # no recency decay
-    )
-    result = compute_final_scores([item])
-    assert result[0]["final_score"] >= 0.15
+def test_compute_sector_scores_basic_multiplication():
+    """final_score = eng_norm × boost × recency; item without timestamp → recency=1.0 (neutral)."""
+    item = _make_scored_item(engagement_normalized=0.5, cross_source_boost=1.0)
+    result = compute_sector_scores([item])
+    # no timestamp → recency 1.0 → 0.5 * 1.0 * 1.0 = 0.5
+    assert result[0]["final_score"] == pytest.approx(0.5, rel=1e-3)
+    assert result[0]["recency_multiplier"] == pytest.approx(1.0, rel=1e-3)
 
 
-def test_final_score_recency_decay_hot_only():
-    """Hot item is decayed by age; evergreen item with same score inputs is not."""
-    hot_item = _make_scored_item(
-        matched_tier="tier2",
-        engagement_normalized=0.5,
-        cross_source_boost=1.0,
-        content_type="hot",
-        hours_since_published=36.0,  # halfway through decay window
-    )
-    evergreen_item = _make_scored_item(
-        matched_tier="tier2",
-        engagement_normalized=0.5,
-        cross_source_boost=1.0,
-        content_type="evergreen",
-        hours_since_published=36.0,
-    )
-    hot_result = compute_final_scores([hot_item])[0]
-    ever_result = compute_final_scores([evergreen_item])[0]
-    # Hot item should be decayed → lower score
-    assert hot_result["final_score"] < ever_result["final_score"]
-
-
-def test_final_score_cross_source_multiplier():
-    """Cluster with 3 sources (boost=2.5) scores higher than singleton (boost=1.0) given same other inputs."""
-    singleton = _make_scored_item(
-        matched_tier="tier3",
-        engagement_normalized=0.5,
-        cross_source_boost=1.0,
-        content_type="evergreen",
-    )
-    clustered = _make_scored_item(
-        matched_tier="tier3",
-        engagement_normalized=0.5,
-        cross_source_boost=2.5,
-        content_type="evergreen",
-    )
-    single_result = compute_final_scores([singleton])[0]
-    cluster_result = compute_final_scores([clustered])[0]
+def test_compute_sector_scores_cross_source_multiplier():
+    """Cluster boost multiplies into the score (neutral recency baseline for both)."""
+    singleton = _make_scored_item(engagement_normalized=0.5, cross_source_boost=1.0)
+    clustered = _make_scored_item(engagement_normalized=0.5, cross_source_boost=2.5)
+    single_result = compute_sector_scores([singleton])[0]
+    cluster_result = compute_sector_scores([clustered])[0]
     assert cluster_result["final_score"] == pytest.approx(single_result["final_score"] * 2.5, rel=1e-3)
 
 
+def test_compute_sector_scores_recency_decay_applied():
+    """Old items (>72h) get a lower final_score than fresh items with identical other inputs."""
+    fresh = _make_scored_item(
+        engagement_normalized=0.5,
+        cross_source_boost=1.0,
+        created=time.time() - 2 * 3600,  # 2 hours ago → 1.30x
+    )
+    stale = _make_scored_item(
+        engagement_normalized=0.5,
+        cross_source_boost=1.0,
+        created=time.time() - 200 * 3600,  # 200 hours ago → 0.40x
+    )
+    fresh_score = compute_sector_scores([fresh])[0]["final_score"]
+    stale_score = compute_sector_scores([stale])[0]["final_score"]
+    assert fresh_score > stale_score
+    assert fresh_score == pytest.approx(0.5 * 1.30, rel=1e-3)
+    assert stale_score == pytest.approx(0.5 * 0.40, rel=1e-3)
+
+
 # ===========================================================================
-# run_pipeline integration
+# run_sector_pipeline integration
 # ===========================================================================
 
 
-def _synthetic_items_8() -> list[dict]:
-    """8 synthetic items for integration tests."""
-    now = time.time()
+def _synthetic_sector_items() -> list[dict]:
+    """Synthetic items across all sectors (2 anthropic + 4 pillars)."""
     return [
-        # tier1 items
-        {"title": "Claude 3 new release today", "source": "hacker_news", "engagement": 300, "url": "https://hn.example.com/claude3", "description": "", "created": now - 1800},
-        {"title": "Anthropic MCP announcement", "source": "reddit_localllama", "engagement": 200, "url": "https://reddit.com/mcp", "description": "", "created": now - 3600},
-        # tier2 items — must meet per-source threshold
-        {"title": "Cursor IDE new features", "source": "reddit_programming", "engagement": 100, "url": "https://reddit.com/cursor", "description": "", "created": now - 7200},
-        {"title": "OpenAI GPT new release", "source": "hacker_news", "engagement": 50, "url": "https://hn.example.com/openai", "description": "", "created": now - 900},
-        # tier3 items with cross-source
-        {"title": "LLM benchmark comparison results", "source": "github_trending", "engagement": 400, "url": "https://github.com/llm-bench", "description": "", "created": now - 2700},
-        {"title": "LLM benchmark comparison results", "source": "hacker_news", "engagement": 150, "url": "https://github.com/llm-bench", "description": "", "created": now - 5400},
-        # additional tier1
-        {"title": "Claude code assistant walkthrough", "source": "youtube", "engagement": 50, "views": 8000, "url": "https://youtube.com/claude-code", "description": "", "published": "3 hours ago"},
-        {"title": "Model context protocol tutorial", "source": "geeknews", "engagement": 5, "url": "https://geeknews.example.com/mcp-tutorial", "description": "", "created": now - 1200},
+        # anthropic_news (URL-routed)
+        {
+            "title": "Anthropic announces new safety research",
+            "source": "anthropic_releases",
+            "url": "https://www.anthropic.com/news/safety-research",
+            "engagement": 0,
+            "description": "",
+        },
+        # anthropic_blog (URL-routed)
+        {
+            "title": "Building with Claude: best practices",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/best-practices",
+            "engagement": 0,
+            "description": "",
+        },
+        # claude_code (pillar)
+        {
+            "title": "Claude Code tips for power users",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/claude-code",
+            "engagement": 200,
+            "description": "",
+        },
+        # agents (pillar)
+        {
+            "title": "LangGraph tutorial for agent workflows",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/langgraph",
+            "engagement": 120,
+            "description": "",
+        },
+        # ai_infra (pillar)
+        {
+            "title": "OpenAI Codex updates summary",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/codex",
+            "engagement": 100,
+            "description": "",
+        },
+        # local_llm (pillar)
+        {
+            "title": "Ollama performance benchmarks",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/ollama",
+            "engagement": 150,
+            "description": "",
+        },
+        # No match — dropped
+        {
+            "title": "Weekend hiking report",
+            "source": "reddit_hiking",
+            "url": "https://reddit.com/hike",
+            "engagement": 50,
+            "description": "",
+        },
     ]
 
 
-def test_run_pipeline_end_to_end():
-    """run_pipeline returns dict with hot/evergreen/all_scored/clusters keys; top items have final_score."""
-    items = _synthetic_items_8()
-    result = run_pipeline(items)
-    assert set(result.keys()) == {"hot", "evergreen", "all_scored", "clusters", "max_score"}
-    assert isinstance(result["hot"], list)
-    assert isinstance(result["evergreen"], list)
-    assert isinstance(result["all_scored"], list)
-    assert isinstance(result["clusters"], list)
-    # All scored items must have final_score
+def test_run_sector_pipeline_returns_all_6_sectors():
+    """run_sector_pipeline returns all 6 sectors (2 anthropic + 4 pillar)."""
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
+    assert "sectors" in result
+    expected = {name for name, _ in SECTORS}
+    assert set(result["sectors"].keys()) == expected
+    assert len(expected) == 6
+
+
+def test_run_sector_pipeline_return_keys():
+    """Result dict has expected top-level keys."""
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
+    assert set(result.keys()) >= {"sectors", "all_scored", "clusters", "max_score"}
+
+
+def test_run_sector_pipeline_sector_count_default_5():
+    """Default: each sector caps at 5 items."""
+    items = [
+        {
+            "title": f"Claude Code article {i}",
+            "source": "hacker_news",
+            "url": f"https://hn.example.com/claude-code-{i}",
+            "engagement": 100 + i,
+            "description": "",
+        }
+        for i in range(8)
+    ]
+    result = run_sector_pipeline(items)
+    assert len(result["sectors"]["claude_code"]) <= 5
+
+
+def test_run_sector_pipeline_sector_count_override():
+    """config sector_counts override default 5-per-sector."""
+    items = [
+        {
+            "title": f"Claude Code article {i}",
+            "source": "hacker_news",
+            "url": f"https://hn.example.com/claude-code-{i}",
+            "engagement": 100 + i,
+            "description": "",
+        }
+        for i in range(8)
+    ]
+    result = run_sector_pipeline(items, config={"sector_counts": {"claude_code": 3}})
+    assert len(result["sectors"]["claude_code"]) == 3
+
+
+def test_run_sector_pipeline_empty_input():
+    """Empty list returns all sectors empty without crash."""
+    result = run_sector_pipeline([])
+    assert result["sectors"] == {name: [] for name, _ in SECTORS}
+    assert result["all_scored"] == []
+    assert result["clusters"] == []
+    assert result["max_score"] >= 1.0
+
+
+def test_run_sector_pipeline_youtube_excluded_from_keyword_sector():
+    """YouTube item with claude code keyword is excluded from claude_code sector list."""
+    items = [
+        {
+            "title": "Claude Code Opus 4.6 review",
+            "source": "youtube",
+            "views": 200000,
+            "engagement": 50,
+            "url": "https://youtube.com/watch?v=x",
+            "description": "claude code",
+            "published": "1 hour ago",
+        },
+        {
+            "title": "Claude code tips",
+            "source": "github_trending",
+            "engagement": 80,
+            "url": "https://github.com/claude-tips",
+            "description": "claude code",
+        },
+        {
+            "title": "Claude code announcement from Anthropic",
+            "source": "hacker_news",
+            "engagement": 60,
+            "url": "https://hn.example.com/claude-code",
+            "description": "claude code",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    sources_in_claude_code = [it["source"] for it in result["sectors"]["claude_code"]]
+    assert "youtube" not in sources_in_claude_code
+
+
+def test_run_sector_pipeline_geeknews_excluded_from_keyword_sector():
+    """GeekNews item with mcp keyword is excluded from claude_code sector list."""
+    items = [
+        {
+            "title": "Claude Code MCP 소개",
+            "source": "geeknews",
+            "engagement": 50,
+            "url": "https://news.hada.io/mcp",
+            "description": "claude code mcp",
+        },
+        {
+            "title": "Claude Code MCP deep dive",
+            "source": "github_trending",
+            "engagement": 80,
+            "url": "https://github.com/mcp-deep",
+            "description": "claude code mcp",
+        },
+        {
+            "title": "MCP claude code explainer",
+            "source": "hacker_news",
+            "engagement": 60,
+            "url": "https://hn.example.com/mcp",
+            "description": "claude code mcp",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    sources = [it["source"] for it in result["sectors"]["claude_code"]]
+    assert "geeknews" not in sources
+
+
+def test_run_sector_pipeline_all_scored_have_final_score():
+    """Every item in all_scored has a final_score."""
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
     for it in result["all_scored"]:
         assert "final_score" in it
 
 
-def test_run_pipeline_tier1_reserved_slot():
-    """tier1 item with engagement=0 still appears in hot output even when 4 tier3 items score higher."""
-    now = time.time()
-    # 1 tier1 item with zero engagement
-    tier1 = {"title": "Claude API major update", "source": "hacker_news", "engagement": 0, "url": "https://hn.example.com/claude-api", "description": ""}
-    # 4 tier3 items from different sources (cross-source so they pass tag_tiers)
-    shared_url = "https://example.com/llm-story"
-    tier3_items = [
-        {"title": "LLM performance benchmark test", "source": "hacker_news", "engagement": 5000, "url": shared_url, "description": "", "created": now - 100},
-        {"title": "LLM performance benchmark test", "source": "reddit_localllama", "engagement": 4000, "url": shared_url, "description": "", "created": now - 200},
-        {"title": "LLM performance benchmark test", "source": "github_trending", "engagement": 3000, "url": shared_url, "description": "", "created": now - 300},
-        {"title": "LLM performance benchmark test", "source": "youtube", "engagement": 2000, "views": 50000, "url": shared_url, "description": "", "published": "1 hour ago"},
-    ]
-    result = run_pipeline([tier1] + tier3_items, config={"hot_count": 3})
-    hot_tiers = [it.get("matched_tier") for it in result["hot"]]
-    assert "tier1" in hot_tiers, f"Expected tier1 in hot output, got tiers: {hot_tiers}"
-
-
-def test_run_pipeline_respects_hot_count():
-    """hot_count=2 returns at most 2 hot items."""
-    items = _synthetic_items_8()
-    result = run_pipeline(items, config={"hot_count": 2})
-    assert len(result["hot"]) <= 2
-
-
-def test_run_pipeline_empty_input():
-    """Empty list returns the expected empty-dict structure without crash."""
-    result = run_pipeline([])
-    assert result == {"hot": [], "evergreen": [], "all_scored": [], "clusters": [], "max_score": 1.0}
-
-
 # ===========================================================================
-# adapt_for_filter_seen
+# adapt_for_filter_seen — fresh singleton cap
 # ===========================================================================
 
 
@@ -515,13 +702,14 @@ def _make_adapted_item(**kwargs) -> dict:
         "url": kwargs.get("url", "https://example.com/adapted"),
         "description": kwargs.get("description", "Some description"),
         "final_score": kwargs.get("final_score", 3.0),
-        "matched_tier": kwargs.get("matched_tier", "tier2"),
+        "sector": kwargs.get("sector", "claude_code"),
         "cross_source_count": kwargs.get("cross_source_count", 1),
+        "recency_multiplier": kwargs.get("recency_multiplier", 1.0),
     }
 
 
 def test_adapt_shape():
-    """Each adapted topic has keys: topic, score, reasons, references; each reference has title/url/source/engagement."""
+    """Each adapted topic has keys: topic, score, reasons, references."""
     item = _make_adapted_item()
     result = adapt_for_filter_seen([item])
     assert len(result) == 1
@@ -540,17 +728,16 @@ def test_adapt_exactly_one_reference():
 
 
 def test_adapt_display_score_range():
-    """score field is int in [0, 99]; singleton top item is capped at 70, not 99."""
+    """score field is int in [0, 99]; singleton (neutral recency) is capped at 70."""
     items = [
-        _make_adapted_item(final_score=6.0, cross_source_count=1),
-        _make_adapted_item(final_score=0.0, cross_source_count=1),
-        _make_adapted_item(final_score=3.0, cross_source_count=1),
+        _make_adapted_item(final_score=6.0, cross_source_count=1, recency_multiplier=1.0),
+        _make_adapted_item(final_score=0.0, cross_source_count=1, recency_multiplier=1.0),
+        _make_adapted_item(final_score=3.0, cross_source_count=1, recency_multiplier=1.0),
     ]
     result = adapt_for_filter_seen(items, max_score=6.0)
     for topic in result:
         assert isinstance(topic["score"], int)
         assert 0 <= topic["score"] <= 99
-    # singleton top item is capped at 70 (cross_source_count=1)
     assert result[0]["score"] <= 70
 
 
@@ -558,9 +745,9 @@ def test_adapt_display_score_cap_by_cross_source():
     """Cross-source cap: singleton<=70, 2-source<=85, 3-source<=99."""
     max_score = 6.0
     items = [
-        _make_adapted_item(title="Singleton", final_score=6.0, cross_source_count=1),
-        _make_adapted_item(title="Two sources", final_score=6.0, cross_source_count=2),
-        _make_adapted_item(title="Three sources", final_score=6.0, cross_source_count=3),
+        _make_adapted_item(title="Singleton", final_score=6.0, cross_source_count=1, recency_multiplier=1.0),
+        _make_adapted_item(title="Two sources", final_score=6.0, cross_source_count=2, recency_multiplier=1.0),
+        _make_adapted_item(title="Three sources", final_score=6.0, cross_source_count=3, recency_multiplier=1.0),
     ]
     result = adapt_for_filter_seen(items, max_score=max_score)
     by_title = {t["topic"]: t["score"] for t in result}
@@ -569,8 +756,72 @@ def test_adapt_display_score_cap_by_cross_source():
     assert by_title["Three sources"] <= 99
 
 
+def test_display_cap_fresh_singleton_90_not_70():
+    """Singleton with recency_multiplier >= 1.3 gets FRESH_SINGLETON_CAP=90, not 70."""
+    item = _make_adapted_item(
+        title="Fresh breaking singleton",
+        final_score=6.0,
+        cross_source_count=1,
+        recency_multiplier=1.3,
+    )
+    result = adapt_for_filter_seen([item], max_score=6.0)
+    # relative is 99 at max_score; cap upgraded to 90
+    assert result[0]["score"] == FRESH_SINGLETON_CAP
+    assert result[0]["score"] > 70
+
+
+def test_display_cap_non_fresh_singleton_still_70():
+    """Singleton with recency_multiplier < 1.3 stays capped at 70."""
+    item = _make_adapted_item(
+        title="Stale singleton",
+        final_score=6.0,
+        cross_source_count=1,
+        recency_multiplier=1.0,
+    )
+    result = adapt_for_filter_seen([item], max_score=6.0)
+    assert result[0]["score"] <= 70
+
+
 # ===========================================================================
-# NON_ANCHOR_SOURCES
+# Rolling 7-day max anchor
+# ===========================================================================
+
+
+def test_rolling_max_floor_prevents_weak_batch_inflation(tmp_path, monkeypatch):
+    """When today_max << rolling_max*0.7, display scores shrink (weak batch protection).
+
+    Strategy: the autouse `_isolate_rolling_stats` fixture already redirects
+    rolling_stats IO into tmp_path. We seed that same tmp store with a high max
+    so the anchor floor kicks in for this run.
+    """
+    import rolling_stats as rs
+
+    # The autouse fixture has already wrapped load/save to point at a tmp path.
+    # Seeding via `rs.save_rolling_stats([], 10.0)` uses whatever path the autouse
+    # chose, so the subsequent run_sector_pipeline call reads the same state.
+    rs.save_rolling_stats([], 10.0)
+    samples = rs.load_rolling_stats()
+    assert any(abs(v - 10.0) < 1e-6 for _, v in samples)
+
+    items = [
+        {
+            "title": "Claude Code tiny item",
+            "source": "hacker_news",
+            "engagement": 10,
+            "url": "https://hn.example.com/tiny",
+            "description": "",
+        }
+    ]
+    import pipeline as pl
+    result = pl.run_sector_pipeline(items)
+    # max_score anchor should be max(today_max, rolling_max * 0.7) ≈ 7.0.
+    assert result["max_score"] >= 7.0 - 0.01
+    # tmp_path not directly used — autouse owns it. Keep arg to confirm scoping.
+    del tmp_path, monkeypatch
+
+
+# ===========================================================================
+# NON_ANCHOR_SOURCES / NON_OFFICIAL_SECTORS
 # ===========================================================================
 
 
@@ -580,97 +831,393 @@ def test_non_anchor_sources_exported():
     assert "geeknews" in NON_ANCHOR_SOURCES
 
 
-def test_run_pipeline_youtube_not_anchor():
-    """High-engagement YouTube tier1 item must not appear as a hot/evergreen anchor."""
+def test_non_official_sectors_exported():
+    """NON_OFFICIAL_SECTORS covers all 4 pillar sectors."""
+    assert "claude_code" in NON_OFFICIAL_SECTORS
+    assert "agents" in NON_OFFICIAL_SECTORS
+    assert "local_llm" in NON_OFFICIAL_SECTORS
+    assert "ai_infra" in NON_OFFICIAL_SECTORS
+
+
+def test_anthropic_releases_excluded_from_claude_code_sector_boost():
+    """HN 'Claude Code Routines' + anthropic_releases 같은 주제 블로그가 클러스터로 묶여도
+    HN 아이템의 cross_source_count는 1(싱글턴 취급), boost=1.0이어야 한다."""
     items = [
         {
-            "title": "Claude Opus 4.6 review NERFED",
-            "source": "youtube",
-            "engagement": 50,
-            "views": 200000,
-            "url": "https://youtube.com/yt-high",
-            "description": "claude",
-            "published": "1 hour ago",
-        },
-        {
-            "title": "Claude code tips and tricks",
-            "source": "github_trending",
-            "engagement": 80,
-            "url": "https://github.com/claude-tips",
-            "description": "claude",
-        },
-        {
-            "title": "Anthropic new model claude announcement",
+            "title": "Claude Code Routines",
             "source": "hacker_news",
-            "engagement": 60,
-            "url": "https://hn.example.com/anthropic",
-            "description": "claude anthropic",
-        },
-    ]
-    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 2})
-    anchor_sources = [it["source"] for it in result["hot"] + result["evergreen"]]
-    assert "youtube" not in anchor_sources, f"YouTube appeared as anchor: {anchor_sources}"
-
-
-def test_run_pipeline_geeknews_not_anchor():
-    """High-engagement GeekNews tier1 item must not appear as a hot/evergreen anchor."""
-    items = [
-        {
-            "title": "Claude MCP model context protocol 소개",
-            "source": "geeknews",
-            "engagement": 50,
-            "url": "https://news.hada.io/mcp",
-            "description": "claude mcp",
-        },
-        {
-            "title": "Claude MCP deep dive",
-            "source": "github_trending",
-            "engagement": 80,
-            "url": "https://github.com/mcp-deep",
-            "description": "claude mcp",
-        },
-        {
-            "title": "Model context protocol claude explained",
-            "source": "hacker_news",
-            "engagement": 60,
-            "url": "https://hn.example.com/mcp",
-            "description": "claude mcp",
-        },
-    ]
-    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 2})
-    anchor_sources = [it["source"] for it in result["hot"] + result["evergreen"]]
-    assert "geeknews" not in anchor_sources, f"GeekNews appeared as anchor: {anchor_sources}"
-
-
-def test_run_pipeline_youtube_still_in_cluster_refs():
-    """YouTube item clusters with a GitHub item; GitHub is the anchor and YouTube appears in cluster_refs."""
-    shared_url = "https://github.com/karpathy/claude-tutorial"
-    items = [
-        {
-            "title": "karpathy claude tutorial walkthrough",
-            "source": "youtube",
-            "engagement": 50,
-            "views": 150000,
-            "url": shared_url,
-            "description": "claude tutorial",
-            "published": "2 days ago",
-        },
-        {
-            "title": "karpathy claude tutorial walkthrough",
-            "source": "github_trending",
+            "url": "https://hn.example.com/claude-code-routines",
             "engagement": 300,
-            "url": shared_url,
-            "description": "claude tutorial",
+            "description": "claude code routines hn discussion",
+        },
+        {
+            "title": "Introducing routines in Claude Code",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/introducing-routines-in-claude-code",
+            "engagement": 0,
+            "description": "claude code routines official",
         },
     ]
-    result = run_pipeline(items, config={"hot_count": 3, "evergreen_count": 3})
-    all_anchors = result["hot"] + result["evergreen"]
-    # GitHub item should be anchor
-    github_anchor = next((it for it in all_anchors if it["source"] == "github_trending"), None)
-    assert github_anchor is not None, "GitHub item not found as anchor"
-    # YouTube should NOT be anchor
-    anchor_sources = [it["source"] for it in all_anchors]
-    assert "youtube" not in anchor_sources, f"YouTube appeared as anchor: {anchor_sources}"
-    # YouTube should appear in cluster_refs of the GitHub anchor
-    refs_sources = [r["source"] for r in github_anchor.get("cluster_refs", [])]
-    assert "youtube" in refs_sources, f"YouTube not in cluster_refs: {refs_sources}"
+    result = run_sector_pipeline(items)
+    claude_items = result["sectors"]["claude_code"]
+    assert len(claude_items) == 1
+    hn_item = claude_items[0]
+    assert hn_item["source"] == "hacker_news"
+    # 핵심 검증: anthropic_releases가 제외되어 싱글턴 취급
+    assert hn_item["cross_source_count"] == 1
+    assert hn_item["cross_source_boost"] == CROSS_SOURCE_BOOST[1]
+
+
+def test_anthropic_releases_excluded_from_claude_code_cluster_refs():
+    """Claude Code 섹터 아이템의 cluster_refs에 anthropic_releases 항목이 노출되면 안 된다."""
+    items = [
+        {
+            "title": "Claude Code Routines",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/claude-code-routines",
+            "engagement": 300,
+            "description": "claude code routines hn discussion",
+        },
+        {
+            "title": "Introducing routines in Claude Code",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/introducing-routines-in-claude-code",
+            "engagement": 0,
+            "description": "claude code routines official",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    claude_items = result["sectors"]["claude_code"]
+    assert len(claude_items) == 1
+    hn_item = claude_items[0]
+    ref_sources = [r["source"] for r in hn_item.get("cluster_refs", [])]
+    assert "anthropic_releases" not in ref_sources
+
+
+def test_anthropic_releases_kept_in_anthropic_sector_refs():
+    """anthropic_news 섹터에서는 NON_OFFICIAL_SECTORS 제외 규칙이 적용되지 않아
+    HN 등 다른 소스가 cluster_refs에 그대로 들어간다."""
+    items = [
+        {
+            "title": "Anthropic announces new subagents feature release",
+            "source": "anthropic_releases",
+            "url": "https://www.anthropic.com/news/subagents-feature-release",
+            "engagement": 0,
+            "description": "anthropic subagents announcement",
+        },
+        {
+            "title": "Anthropic announces new subagents feature released",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/anthropic-subagents-feature",
+            "engagement": 500,
+            "description": "anthropic subagents hn thread",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    news_items = result["sectors"]["anthropic_news"]
+    assert len(news_items) == 1
+    anth = news_items[0]
+    if anth.get("cluster_id") is not None:
+        ref_sources = [r["source"] for r in anth.get("cluster_refs", [])]
+        assert "hacker_news" in ref_sources
+        assert anth["cross_source_count"] >= 2
+
+
+# ===========================================================================
+# format_sector_html (main.py) — per-sector chunk output
+# ===========================================================================
+
+
+def _fake_sector_result() -> dict:
+    """Construct a synthetic sector display result with items across sectors."""
+    return {
+        "sectors": {
+            "anthropic_news": [
+                {
+                    "title": "Anthropic announces update",
+                    "url": "https://www.anthropic.com/news/update",
+                    "source": "anthropic_releases",
+                    "final_score": 4.0,
+                    "cross_source_count": 1,
+                    "description": "Anthropic safety update",
+                    "cluster_refs": [],
+                },
+            ],
+            "anthropic_blog": [
+                {
+                    "title": "Best practices for Claude",
+                    "url": "https://claude.com/blog/best",
+                    "source": "anthropic_releases",
+                    "final_score": 3.5,
+                    "cross_source_count": 1,
+                    "description": "Prompting patterns",
+                    "cluster_refs": [],
+                },
+            ],
+            "claude_code": [
+                {
+                    "title": "Claude Code tips",
+                    "url": "https://hn.example.com/claude-code",
+                    "source": "hacker_news",
+                    "final_score": 5.0,
+                    "cross_source_count": 2,
+                    "description": "Power user tricks",
+                    "cluster_refs": [
+                        {
+                            "title": "Claude Code deep dive",
+                            "url": "https://github.com/claude-code",
+                            "source": "github_trending",
+                        },
+                    ],
+                },
+            ],
+            "agents": [],
+            "local_llm": [
+                {
+                    "title": "Ollama benchmarks",
+                    "url": "https://hn.example.com/ollama",
+                    "source": "hacker_news",
+                    "final_score": 4.2,
+                    "cross_source_count": 1,
+                    "description": "Perf numbers",
+                    "cluster_refs": [],
+                },
+            ],
+            "ai_infra": [],
+        },
+    }
+
+
+def test_format_sector_html_returns_list():
+    """format_sector_html returns a list of strings."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    assert isinstance(chunks, list)
+    assert all(isinstance(c, str) for c in chunks)
+
+
+def test_format_sector_html_length_matches_sectors():
+    """format_sector_html returns exactly len(SECTORS) chunks even with empty sectors."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    assert len(chunks) == len(SECTORS)
+
+
+def test_format_sector_html_empty_sector_has_placeholder():
+    """Empty sectors still get a chunk containing '(없음)'."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    agents_idx = next(i for i, (name, _) in enumerate(SECTORS) if name == "agents")
+    assert "(없음)" in chunks[agents_idx]
+
+
+def test_format_sector_html_chunk_starts_with_sector_header():
+    """Each chunk begins with the sector's emoji followed by a <b> tag."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    for chunk, (_name, cfg) in zip(chunks, SECTORS):
+        emoji = cfg.get("emoji", "")
+        assert chunk.startswith(f"{emoji} <b>"), (
+            f"Chunk should start with '{emoji} <b>' but got: {chunk[:40]!r}"
+        )
+
+
+def test_format_sector_html_no_break_token_in_any_chunk():
+    """No individual chunk contains the @@@SECTOR_BREAK@@@ delimiter."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    for chunk in chunks:
+        assert "@@@SECTOR_BREAK@@@" not in chunk
+
+
+def test_format_sector_html_chunks_under_4096():
+    """No individual chunk exceeds the Telegram 4096-char message limit."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    for chunk in chunks:
+        assert len(chunk) <= 4096
+
+
+def test_format_sector_html_no_wrapper_header():
+    """No chunk contains the old '🔥 섹터별 핫토픽' wrapper header."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    joined = "\n".join(chunks)
+    assert "🔥 <b>섹터별 핫토픽</b>" not in joined
+
+
+# ===========================================================================
+# History cap tests (load / save 500-entry + 14-day limits)
+# ===========================================================================
+
+
+def test_history_load_caps_at_500_entries(tmp_path, monkeypatch):
+    """load_history returns at most 500 entries even if file has more."""
+    import history as history_mod
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+
+    # Write 700 recent entries
+    now = datetime.now()
+    entries = [
+        {
+            "topic": f"Topic {i}",
+            "score": 50,
+            "reasons": [],
+            "references": [f"https://example.com/{i}"],
+            "mode": "sector",
+            "saved_at": (now - timedelta(days=1)).isoformat(),
+        }
+        for i in range(700)
+    ]
+    import json as _json
+    with open(hist_path, "w", encoding="utf-8") as f:
+        _json.dump(entries, f)
+
+    loaded = history_mod.load_history()
+    assert len(loaded) <= 500
+    # Last 500 should be the newest-inserted (indices 200..699)
+    assert loaded[-1]["topic"] == "Topic 699"
+
+
+def test_history_drops_older_than_14_days(tmp_path, monkeypatch):
+    """Entries older than 14 days are dropped on load."""
+    import history as history_mod
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+
+    now = datetime.now()
+    old = {
+        "topic": "Ancient Topic",
+        "score": 10,
+        "reasons": [],
+        "references": ["https://example.com/old"],
+        "mode": "sector",
+        "saved_at": (now - timedelta(days=30)).isoformat(),
+    }
+    fresh = {
+        "topic": "Fresh Topic",
+        "score": 80,
+        "reasons": [],
+        "references": ["https://example.com/fresh"],
+        "mode": "sector",
+        "saved_at": (now - timedelta(hours=2)).isoformat(),
+    }
+    import json as _json
+    with open(hist_path, "w", encoding="utf-8") as f:
+        _json.dump([old, fresh], f)
+
+    loaded = history_mod.load_history()
+    topics = {e["topic"] for e in loaded}
+    assert "Fresh Topic" in topics
+    assert "Ancient Topic" not in topics
+
+
+def test_history_legacy_entry_no_saved_at_kept(tmp_path, monkeypatch):
+    """Legacy entries without saved_at field are kept (count-only cap)."""
+    import history as history_mod
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+
+    legacy = {
+        "topic": "Legacy Topic",
+        "score": 10,
+        "reasons": [],
+        "references": ["https://example.com/legacy"],
+        "mode": "sector",
+        # no saved_at
+    }
+    import json as _json
+    with open(hist_path, "w", encoding="utf-8") as f:
+        _json.dump([legacy], f)
+
+    loaded = history_mod.load_history()
+    assert len(loaded) == 1
+    assert loaded[0]["topic"] == "Legacy Topic"
+
+
+# ===========================================================================
+# Auto-save CLI behavior
+# ===========================================================================
+
+
+def test_auto_save_persists_all_markdown_urls_without_prompt(tmp_path, monkeypatch, capsys):
+    """With --auto-save, markdown mode saves all output URLs without calling input()."""
+    import builtins
+    import sys as sys_mod
+
+    import history as history_mod
+    import main as main_mod
+    import rolling_stats as rs
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+
+    # Redirect rolling_stats IO to tmp so we don't pollute the worktree.
+    stats_path = tmp_path / "score_stats.json"
+    orig_load = rs.load_rolling_stats
+    orig_save = rs.save_rolling_stats
+    monkeypatch.setattr(
+        rs, "load_rolling_stats",
+        lambda path=None: orig_load(path=str(stats_path)),
+    )
+    monkeypatch.setattr(
+        rs, "save_rolling_stats",
+        lambda samples, today_max, path=None, keep_days=7:
+            orig_save(samples, today_max, path=str(stats_path), keep_days=keep_days),
+    )
+
+    # Fake collect_all so we don't touch network
+    fake_items = [
+        {
+            "title": f"Claude Code article {i}",
+            "source": "hacker_news",
+            "url": f"https://hn.example.com/claude-code-{i}",
+            "engagement": 100 + i,
+            "description": "",
+        }
+        for i in range(3)
+    ]
+    monkeypatch.setattr(main_mod, "collect_all", lambda *a, **k: list(fake_items))
+
+    # Fail if input() is called — we must bypass the interactive prompt
+    def _fail_input(*args, **kwargs):
+        raise AssertionError("input() must not be called in auto-save mode")
+
+    monkeypatch.setattr(builtins, "input", _fail_input)
+    # Also block rich console.input which is what main.py uses
+    from rich.console import Console as _RichConsole
+    monkeypatch.setattr(_RichConsole, "input", lambda self, *a, **k: _fail_input())
+
+    monkeypatch.setattr(sys_mod, "argv", [
+        "main.py", "--mode", "sector", "--format", "markdown", "--auto-save",
+    ])
+
+    # stdout reconfigure may not work with pytest capsys; guard it
+    try:
+        main_mod.cli()
+    except SystemExit:
+        pass
+
+    # capsys captured the markdown output — confirm something was printed
+    captured = capsys.readouterr()
+    assert captured.out.strip(), "expected non-empty markdown output"
+
+    # And URLs should be saved in history
+    saved = history_mod.load_history()
+    saved_urls = set()
+    for entry in saved:
+        for u in entry.get("references", []):
+            saved_urls.add(u)
+    for item in fake_items:
+        assert item["url"] in saved_urls, f"{item['url']} not auto-saved"

@@ -3,6 +3,7 @@
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,23 +17,29 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# 제목에서 날짜·카테고리 prefix 제거 (예: "Apr 6, 2026AnnouncementsActual Title")
-DATE_CATEGORY_RE = re.compile(
-    r"^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}"
-    r"(?:Announcements|Policy|Research|Product|Safety)?"
+# 제목에서 날짜·카테고리 prefix 캡처 (예: "Apr 6, 2026AnnouncementsActual Title")
+DATE_PREFIX_RE = re.compile(
+    r"^((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4})"
 )
 
 CATEGORY_LABELS = {"Announcements", "Policy", "Research", "Product", "Safety", "Engineering"}
 
 
-def _clean_title(raw: str) -> str:
-    """날짜·카테고리 prefix를 제거한 제목 반환."""
-    title = DATE_CATEGORY_RE.sub("", raw).strip()
-    # 남은 카테고리 라벨 제거
+def _parse_title(raw: str) -> tuple[str, datetime | None]:
+    """raw 제목에서 (cleaned_title, published_at) 분리. 날짜 prefix가 없으면 (raw, None)."""
+    m = DATE_PREFIX_RE.match(raw)
+    if not m:
+        return raw, None
+    try:
+        published = datetime.strptime(m.group(1), "%b %d, %Y")
+    except ValueError:
+        published = None
+    rest = raw[m.end():].strip()
     for label in CATEGORY_LABELS:
-        if title.startswith(label):
-            title = title[len(label):].strip()
-    return title
+        if rest.startswith(label):
+            rest = rest[len(label):].strip()
+            break
+    return (rest or raw), published
 
 
 def _fetch_meta_description(url: str) -> str:
@@ -64,8 +71,8 @@ def _enrich_descriptions(items: list[dict]) -> list[dict]:
     return items
 
 
-def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[dict]:
-    """단일 페이지에서 글 목록 수집."""
+def _fetch_page(url: str, path_prefix: str) -> list[dict]:
+    """단일 페이지에서 글 목록 수집. 날짜 prefix가 있으면 published_at 필드에 저장."""
     try:
         resp = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
         resp.raise_for_status()
@@ -90,7 +97,7 @@ def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[
         if not raw_title or len(raw_title) < 10 or raw_title == "Read more":
             continue
 
-        title = _clean_title(raw_title) if clean_titles else raw_title
+        title, published_at = _parse_title(raw_title)
         if not title or len(title) < 10:
             continue
 
@@ -102,16 +109,25 @@ def _fetch_page(url: str, path_prefix: str, clean_titles: bool = False) -> list[
             "title": title,
             "url": full_url,
             "description": title,
+            "published_at": published_at,
         })
 
-    return results[:15]
+    return results
+
+
+def _sort_by_date(items: list[dict]) -> list[dict]:
+    """published_at 내림차순 정렬. None은 가장 뒤로."""
+    return sorted(
+        items,
+        key=lambda it: it.get("published_at") or datetime.min,
+        reverse=True,
+    )
 
 
 def fetch_anthropic_releases() -> list[dict]:
-    """Anthropic 공식 블로그 + 뉴스에서 최신 글 수집."""
-    blog_items = _fetch_page(BLOG_URL, "/blog/", clean_titles=False)
-    news_items = _fetch_page(NEWS_URL, "/news/", clean_titles=True)
+    """Anthropic 공식 블로그 + 뉴스에서 최신 글 수집 (날짜 내림차순)."""
+    blog_items = _sort_by_date(_fetch_page(BLOG_URL, "/blog/"))[:10]
+    news_items = _sort_by_date(_fetch_page(NEWS_URL, "/news/"))[:10]
 
-    # 블로그 최대 10개 + 뉴스 최대 10개, description 병렬 수집
-    combined = blog_items[:10] + news_items[:10]
+    combined = blog_items + news_items
     return _enrich_descriptions(combined)
