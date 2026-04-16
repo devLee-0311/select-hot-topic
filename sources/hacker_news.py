@@ -10,6 +10,7 @@ QUERIES = [
     "claude code", "anthropic claude", "claude AI", "MCP server",
     "LLM", "OpenAI GPT", "AI agent", "AI coding",
     "developer tools", "devtools CLI",
+    "duct tape openai", "gpt image", "AI image generation",
 ]
 TIMEOUT = 10
 
