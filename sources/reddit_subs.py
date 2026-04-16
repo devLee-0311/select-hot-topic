@@ -63,3 +63,33 @@ def fetch_reddit_openai() -> list[dict]:
 def fetch_reddit_programming() -> list[dict]:
     """Reddit r/programming 핫글 수집."""
     return _fetch_subreddit("programming")
+
+
+def fetch_reddit_artificial() -> list[dict]:
+    """Reddit r/artificial 핫글 수집."""
+    return _fetch_subreddit("artificial")
+
+
+def fetch_reddit_machinelearning() -> list[dict]:
+    """Reddit r/MachineLearning 핫글 수집."""
+    return _fetch_subreddit("MachineLearning")
+
+
+def fetch_reddit_singularity() -> list[dict]:
+    """Reddit r/singularity 핫글 수집."""
+    return _fetch_subreddit("singularity")
+
+
+def fetch_reddit_stablediffusion() -> list[dict]:
+    """Reddit r/StableDiffusion 핫글 수집."""
+    return _fetch_subreddit("StableDiffusion")
+
+
+def fetch_reddit_chatgpt() -> list[dict]:
+    """Reddit r/ChatGPT 핫글 수집."""
+    return _fetch_subreddit("ChatGPT")
+
+
+def fetch_reddit_promptengineering() -> list[dict]:
+    """Reddit r/PromptEngineering 핫글 수집."""
+    return _fetch_subreddit("PromptEngineering")
