@@ -8,7 +8,6 @@ from .reddit_subs import (
     fetch_reddit_machinelearning,
     fetch_reddit_singularity,
     fetch_reddit_stablediffusion,
-    fetch_reddit_chatgpt,
     fetch_reddit_promptengineering,
 )
 from .hacker_news import fetch_hacker_news
@@ -26,7 +25,6 @@ __all__ = [
     "fetch_reddit_machinelearning",
     "fetch_reddit_singularity",
     "fetch_reddit_stablediffusion",
-    "fetch_reddit_chatgpt",
     "fetch_reddit_promptengineering",
     "fetch_hacker_news",
     "fetch_youtube_search",

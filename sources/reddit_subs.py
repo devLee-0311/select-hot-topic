@@ -201,10 +201,6 @@ def fetch_reddit_stablediffusion() -> list[dict]:
     return _fetch_subreddit("StableDiffusion")
 
 
-def fetch_reddit_chatgpt() -> list[dict]:
-    """Reddit r/ChatGPT 핫글 수집."""
-    return _fetch_subreddit("ChatGPT")
-
 
 def fetch_reddit_promptengineering() -> list[dict]:
     """Reddit r/PromptEngineering 핫글 수집."""

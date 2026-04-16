@@ -19,7 +19,7 @@ SECTORS: list[tuple[str, dict]] = [
             "label": "Anthropic 공식 뉴스",
             "emoji": "📰",
             "match_url": "anthropic.com/news",
-            "count": 5,
+            "count": 2,
         },
     ),
     (
@@ -28,7 +28,7 @@ SECTORS: list[tuple[str, dict]] = [
             "label": "Anthropic 공식 블로그",
             "emoji": "📝",
             "match_url": "claude.com/blog",
-            "count": 5,
+            "count": 3,
         },
     ),
     (
@@ -81,20 +81,6 @@ SECTORS: list[tuple[str, dict]] = [
         },
     ),
     (
-        "ai_infra",
-        {
-            "label": "AI 인프라 / 툴링",
-            "emoji": "⚙️",
-            "include": [
-                "codex", "gpt-5", "gpt5", "sora", "chatgpt", "cursor",
-                "windsurf", "copilot", "aider", "continue.dev",
-                "openrouter", "vercel ai", "openai",
-            ],
-            "deny": [],
-            "count": 5,
-        },
-    ),
-    (
         "trending",
         {
             "label": "트렌딩",
@@ -130,7 +116,7 @@ SECTORS_BY_KEY: dict[str, dict] = {name: cfg for name, cfg in SECTORS}
 
 # 키워드 기반 섹터 (URL 라우팅이 아닌 섹터) — non-anchor 제외 대상.
 # trending은 catch-all이지만 키워드 매칭이 아닌 fallback이라 여기 포함하지 않음.
-KEYWORD_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+KEYWORD_SECTORS = {"claude_code", "agents", "local_llm"}
 
 # 클러스터 노이즈에서 강제로 제외되는 단어 — generic하지만 섹터 구분에 필수.
 # 이 단어들이 SECTOR_CLUSTER_NOISE에 포함되면 클러스터링 신호가 너무 얕아진다.
@@ -157,7 +143,7 @@ NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
 # 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
 # claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
 # 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
-NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra", "trending"}
+NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "trending"}
 ANTHROPIC_SOURCE_FAMILY = "anthropic"  # _source_family("anthropic_releases")
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}

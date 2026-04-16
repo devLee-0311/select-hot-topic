@@ -15,7 +15,6 @@ from sources import (
     fetch_reddit_machinelearning,
     fetch_reddit_singularity,
     fetch_reddit_stablediffusion,
-    fetch_reddit_chatgpt,
     fetch_reddit_promptengineering,
     fetch_youtube_search,
 )
@@ -53,7 +52,6 @@ SECTOR_CONFIG = ModeConfig(
         "Reddit r/MachineLearning": fetch_reddit_machinelearning,
         "Reddit r/singularity": fetch_reddit_singularity,
         "Reddit r/StableDiffusion": fetch_reddit_stablediffusion,
-        "Reddit r/ChatGPT": fetch_reddit_chatgpt,
         "Reddit r/PromptEngineering": fetch_reddit_promptengineering,
         "Hacker News": fetch_hacker_news,
         "YouTube": fetch_youtube_search,

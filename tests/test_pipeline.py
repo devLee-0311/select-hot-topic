@@ -81,15 +81,15 @@ def test_assign_sector_langgraph_routes_agents():
     assert assign_sector(item) == "agents"
 
 
-def test_assign_sector_cursor_codex_routes_ai_infra():
-    """'cursor' or 'codex' route to ai_infra sector."""
+def test_assign_sector_cursor_codex_unrouted():
+    """'cursor' or 'codex' no longer route anywhere now that ai_infra is removed."""
     cursor_item = {
         "title": "Cursor adds codex mode",
         "source": "hacker_news",
         "url": "https://hn.example.com/cursor-codex",
         "description": "",
     }
-    assert assign_sector(cursor_item) == "ai_infra"
+    assert assign_sector(cursor_item) is None
 
     codex_item = {
         "title": "GPT-5 Codex release notes",
@@ -97,18 +97,18 @@ def test_assign_sector_cursor_codex_routes_ai_infra():
         "url": "https://hn.example.com/codex",
         "description": "",
     }
-    assert assign_sector(codex_item) == "ai_infra"
+    assert assign_sector(codex_item) is None
 
 
-def test_assign_sector_openai_routes_to_ai_infra():
-    """Item with 'openai' keyword (no claude code / agents) routes to ai_infra sector."""
+def test_assign_sector_openai_routes_to_trending():
+    """Item with 'openai' keyword (no claude code / agents) routes to trending sector (ai_infra removed)."""
     item = {
         "title": "OpenAI new feature",
         "source": "hacker_news",
         "url": "https://hn.example.com/openai",
         "description": "",
     }
-    assert assign_sector(item) == "ai_infra"
+    assert assign_sector(item) == "trending"
 
 
 def test_assign_sector_ollama_routes_local_llm():
@@ -360,8 +360,7 @@ def test_sector_cluster_noise_built_correctly():
     # Local LLM pillar tokens
     assert "ollama" in SECTOR_CLUSTER_NOISE
     assert "mistral" in SECTOR_CLUSTER_NOISE
-    # AI infra pillar tokens
-    assert "cursor" in SECTOR_CLUSTER_NOISE
+    # Trending sector tokens
     assert "openai" in SECTOR_CLUSTER_NOISE
 
 
@@ -571,14 +570,14 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_all_7_sectors():
-    """run_sector_pipeline returns all 7 sectors (2 anthropic + 4 pillar + trending)."""
+def test_run_sector_pipeline_returns_all_6_sectors():
+    """run_sector_pipeline returns all 6 sectors (2 anthropic + 3 pillar + trending)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 7
+    assert len(expected) == 6
 
 
 def test_run_sector_pipeline_return_keys():
@@ -843,11 +842,11 @@ def test_non_anchor_sources_exported():
 
 
 def test_non_official_sectors_exported():
-    """NON_OFFICIAL_SECTORS covers all 4 pillar sectors."""
+    """NON_OFFICIAL_SECTORS covers all 3 pillar sectors."""
     assert "claude_code" in NON_OFFICIAL_SECTORS
     assert "agents" in NON_OFFICIAL_SECTORS
     assert "local_llm" in NON_OFFICIAL_SECTORS
-    assert "ai_infra" in NON_OFFICIAL_SECTORS
+    assert "ai_infra" not in NON_OFFICIAL_SECTORS
 
 
 def test_anthropic_releases_excluded_from_claude_code_sector_boost():
@@ -1009,11 +1008,12 @@ def test_format_sector_html_returns_list():
 
 
 def test_format_sector_html_length_matches_sectors():
-    """format_sector_html returns exactly len(SECTORS) chunks even with empty sectors."""
+    """format_sector_html returns len(SECTORS)-1 chunks (anthropic_news+blog merged)."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    assert len(chunks) == len(SECTORS)
+    # anthropic_news + anthropic_blog가 하나로 병합되어 len(SECTORS) - 1
+    assert len(chunks) == len(SECTORS) - 1
 
 
 def test_format_sector_html_empty_sector_has_placeholder():
@@ -1021,20 +1021,33 @@ def test_format_sector_html_empty_sector_has_placeholder():
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    agents_idx = next(i for i, (name, _) in enumerate(SECTORS) if name == "agents")
-    assert "(없음)" in chunks[agents_idx]
+    # anthropic 병합으로 인덱스 오프셋: chunk[0]=anthropic 병합, chunk[1]=claude_code, ...
+    # agents는 SECTORS에서 index 3이지만 병합으로 chunk index 2
+    non_anthropic = [(name, cfg) for name, cfg in SECTORS if name not in {"anthropic_news", "anthropic_blog"}]
+    agents_chunk_idx = next(i for i, (name, _) in enumerate(non_anthropic) if name == "agents") + 1  # +1 for merged anthropic
+    assert "(없음)" in chunks[agents_chunk_idx]
 
 
 def test_format_sector_html_chunk_starts_with_sector_header():
-    """Each chunk begins with the sector's emoji followed by a <b> tag."""
+    """Each chunk begins with an emoji followed by a <b> tag."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    for chunk, (_name, cfg) in zip(chunks, SECTORS):
-        emoji = cfg.get("emoji", "")
-        assert chunk.startswith(f"{emoji} <b>"), (
-            f"Chunk should start with '{emoji} <b>' but got: {chunk[:40]!r}"
+    for chunk in chunks:
+        assert "<b>" in chunk[:20], (
+            f"Chunk should contain '<b>' near start but got: {chunk[:40]!r}"
         )
+
+
+def test_format_sector_html_anthropic_merged():
+    """anthropic_news + anthropic_blog are merged into one chunk."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    anthropic_chunk = chunks[0]
+    assert "📢" in anthropic_chunk
+    assert "📰" in anthropic_chunk
+    assert "📝" in anthropic_chunk
 
 
 def test_format_sector_html_no_break_token_in_any_chunk():
