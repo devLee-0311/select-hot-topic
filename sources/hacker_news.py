@@ -13,6 +13,7 @@ QUERIES = [
     "claude code", "anthropic claude", "claude AI", "MCP server",
     "LLM", "OpenAI GPT", "AI agent", "AI coding",
     "developer tools", "devtools CLI",
+    "duct tape openai", "gpt image", "AI image generation",
 ]
 TOP_STORIES_LIMIT = 60  # 프론트페이지 상위 N개 가져와서 AI 관련만 필터
 TIMEOUT = 10
