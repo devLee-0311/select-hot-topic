@@ -470,18 +470,45 @@ def _recency_multiplier(item: dict) -> float:
     return 0.4
 
 
+def _github_trending_freshness_multiplier(item: dict) -> float:
+    """github_trending 아이템의 신선도 배수 계산 (stars_today/total_stars 비율 기반).
+
+    ratio >= 0.3  → 1.3 (매우 신규/폭발적 성장)
+    ratio >= 0.1  → 1.0 (일반)
+    ratio >= 0.03 → 0.7 (검증된 레포, 신선도 낮음)
+    ratio <  0.03 → 0.4 (오래된 레포, 새소식 아님)
+
+    total_stars == 0이거나 source != "github_trending"이면 호출하지 말 것.
+    """
+    stars_today = float(item.get("stars_today", 0))
+    total_stars = float(item.get("total_stars", 0))
+    ratio = stars_today / total_stars
+    if ratio >= 0.3:
+        return 1.3
+    if ratio >= 0.1:
+        return 1.0
+    if ratio >= 0.03:
+        return 0.7
+    return 0.4
+
+
 def compute_sector_scores(items: list[dict]) -> list[dict]:
     """섹터 모델 최종 점수 계산. 스텝 버킷 recency multiplier 반영.
 
     final_score = engagement_normalized × cross_source_boost × recency_multiplier
 
-    - recency_multiplier는 `_recency_multiplier`로 계산. 타임스탬프 없으면 1.0(중립).
+    - github_trending 아이템이고 total_stars > 0이면 시간 기반 대신
+      stars_today/total_stars 비율로 recency_multiplier를 결정한다.
+    - 그 외에는 `_recency_multiplier`로 계산. 타임스탬프 없으면 1.0(중립).
     - 디버깅/표시용으로 item["recency_multiplier"]에 배수를 저장.
     """
     for item in items:
         eng_norm = item.get("engagement_normalized", 0.5)
         boost = item.get("cross_source_boost", 1.0)
-        rec = _recency_multiplier(item)
+        if item.get("source") == "github_trending" and item.get("total_stars", 0) > 0:
+            rec = _github_trending_freshness_multiplier(item)
+        else:
+            rec = _recency_multiplier(item)
         item["recency_multiplier"] = rec
         item["final_score"] = round(eng_norm * boost * rec, 4)
     return items

@@ -52,12 +52,30 @@ def _parse_repo_row(article) -> dict | None:
                 stars_today = int(digits)
                 break
 
+    # total stars - stargazers 링크 또는 SVG 스타 아이콘 인접 요소에서 파싱
+    total_stars = 0
+    stargazers_a = article.select_one('a[href$="/stargazers"]')
+    if stargazers_a:
+        text = stargazers_a.get_text(strip=True).replace(",", "")
+        digits = "".join(c for c in text if c.isdigit())
+        if digits:
+            total_stars = int(digits)
+    if total_stars == 0:
+        # 폴백: .f6 내의 첫 번째 링크 중 숫자가 있는 것 시도
+        for a_tag in article.select(".f6 a"):
+            text = a_tag.get_text(strip=True).replace(",", "")
+            digits = "".join(c for c in text if c.isdigit())
+            if digits and "star" in a_tag.get("href", "").lower():
+                total_stars = int(digits)
+                break
+
     return {
         "repo_path": repo_path,
         "repo_name": repo_name,
         "repo_url": repo_url,
         "description": description,
         "stars_today": stars_today,
+        "total_stars": total_stars,
     }
 
 
@@ -102,6 +120,7 @@ def fetch_github_trending() -> list[dict]:
                 "url": parsed["repo_url"],
                 "description": parsed["description"],
                 "stars_today": parsed["stars_today"],
+                "total_stars": parsed["total_stars"],
                 "engagement": parsed["stars_today"],
             })
 

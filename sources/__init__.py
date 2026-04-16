@@ -4,6 +4,12 @@ from .reddit_subs import (
     fetch_reddit_localllama,
     fetch_reddit_openai,
     fetch_reddit_programming,
+    fetch_reddit_artificial,
+    fetch_reddit_machinelearning,
+    fetch_reddit_singularity,
+    fetch_reddit_stablediffusion,
+    fetch_reddit_chatgpt,
+    fetch_reddit_promptengineering,
 )
 from .hacker_news import fetch_hacker_news
 from .youtube_search import fetch_youtube_search
@@ -16,6 +22,12 @@ __all__ = [
     "fetch_reddit_localllama",
     "fetch_reddit_openai",
     "fetch_reddit_programming",
+    "fetch_reddit_artificial",
+    "fetch_reddit_machinelearning",
+    "fetch_reddit_singularity",
+    "fetch_reddit_stablediffusion",
+    "fetch_reddit_chatgpt",
+    "fetch_reddit_promptengineering",
     "fetch_hacker_news",
     "fetch_youtube_search",
     "fetch_anthropic_releases",
