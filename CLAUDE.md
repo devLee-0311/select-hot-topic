@@ -20,3 +20,7 @@
 ## GitHub Actions (Telegram 알림) 출력 형식
 
 `--format markdown` 모드에서는 위와 동일한 형식을 따르되, **점수가 높은 순으로 3개**를 출력한다. sector (hot alias) 모드 3개 + anthropic 모드 출력.
+
+### Anthropic 모드 출력 형식
+
+anthropic 모드는 점수 없이 **최신 날짜 기준**으로 뉴스 2개 + 블로그 3개를 섹션 분리하여 출력한다. 각 항목에 번호·날짜·한줄 요약을 포함한다.
