@@ -81,15 +81,15 @@ def test_assign_sector_langgraph_routes_agents():
     assert assign_sector(item) == "agents"
 
 
-def test_assign_sector_cursor_codex_routes_ai_infra():
-    """'cursor' or 'codex' route to ai_infra sector."""
+def test_assign_sector_cursor_codex_unrouted():
+    """'cursor' or 'codex' no longer route anywhere now that ai_infra is removed."""
     cursor_item = {
         "title": "Cursor adds codex mode",
         "source": "hacker_news",
         "url": "https://hn.example.com/cursor-codex",
         "description": "",
     }
-    assert assign_sector(cursor_item) == "ai_infra"
+    assert assign_sector(cursor_item) is None
 
     codex_item = {
         "title": "GPT-5 Codex release notes",
@@ -97,18 +97,18 @@ def test_assign_sector_cursor_codex_routes_ai_infra():
         "url": "https://hn.example.com/codex",
         "description": "",
     }
-    assert assign_sector(codex_item) == "ai_infra"
+    assert assign_sector(codex_item) is None
 
 
-def test_assign_sector_openai_routes_to_ai_infra():
-    """Item with 'openai' keyword (no claude code / agents) routes to ai_infra sector."""
+def test_assign_sector_openai_routes_to_trending():
+    """Item with 'openai' keyword (no claude code / agents) routes to trending sector (ai_infra removed)."""
     item = {
         "title": "OpenAI new feature",
         "source": "hacker_news",
         "url": "https://hn.example.com/openai",
         "description": "",
     }
-    assert assign_sector(item) == "ai_infra"
+    assert assign_sector(item) == "trending"
 
 
 def test_assign_sector_ollama_routes_local_llm():
@@ -360,8 +360,7 @@ def test_sector_cluster_noise_built_correctly():
     # Local LLM pillar tokens
     assert "ollama" in SECTOR_CLUSTER_NOISE
     assert "mistral" in SECTOR_CLUSTER_NOISE
-    # AI infra pillar tokens
-    assert "cursor" in SECTOR_CLUSTER_NOISE
+    # Trending sector tokens
     assert "openai" in SECTOR_CLUSTER_NOISE
 
 
@@ -571,14 +570,14 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_all_7_sectors():
-    """run_sector_pipeline returns all 7 sectors (2 anthropic + 4 pillar + trending)."""
+def test_run_sector_pipeline_returns_all_6_sectors():
+    """run_sector_pipeline returns all 6 sectors (2 anthropic + 3 pillar + trending)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 7
+    assert len(expected) == 6
 
 
 def test_run_sector_pipeline_return_keys():
@@ -843,11 +842,11 @@ def test_non_anchor_sources_exported():
 
 
 def test_non_official_sectors_exported():
-    """NON_OFFICIAL_SECTORS covers all 4 pillar sectors."""
+    """NON_OFFICIAL_SECTORS covers all 3 pillar sectors."""
     assert "claude_code" in NON_OFFICIAL_SECTORS
     assert "agents" in NON_OFFICIAL_SECTORS
     assert "local_llm" in NON_OFFICIAL_SECTORS
-    assert "ai_infra" in NON_OFFICIAL_SECTORS
+    assert "ai_infra" not in NON_OFFICIAL_SECTORS
 
 
 def test_anthropic_releases_excluded_from_claude_code_sector_boost():
