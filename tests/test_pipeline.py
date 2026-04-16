@@ -182,14 +182,14 @@ def test_assign_sector_anthropic_releases_blog_url():
 
 
 def test_assign_sector_no_match_returns_none():
-    """Item with no matching pillar keyword → None (dropped)."""
+    """Item with no matching pillar keyword → 'trending' catch-all."""
     item = {
         "title": "Weekend hiking trail review",
         "source": "reddit_hiking",
         "url": "https://reddit.com/r/hiking/x",
         "description": "",
     }
-    assert assign_sector(item) is None
+    assert assign_sector(item) == "trending"
 
 
 # ===========================================================================
@@ -560,14 +560,14 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_all_6_sectors():
-    """run_sector_pipeline returns all 6 sectors (2 anthropic + 4 pillar)."""
+def test_run_sector_pipeline_returns_all_7_sectors():
+    """run_sector_pipeline returns all 7 sectors (2 anthropic + 4 pillar + trending)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 6
+    assert len(expected) == 7
 
 
 def test_run_sector_pipeline_return_keys():

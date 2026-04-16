@@ -94,11 +94,21 @@ SECTORS: list[tuple[str, dict]] = [
             "count": 5,
         },
     ),
+    (
+        "trending",
+        {
+            "label": "트렌딩",
+            "emoji": "🔥",
+            "catch_all": True,
+            "count": 5,
+        },
+    ),
 ]
 
 SECTORS_BY_KEY: dict[str, dict] = {name: cfg for name, cfg in SECTORS}
 
 # 키워드 기반 섹터 (URL 라우팅이 아닌 섹터) — non-anchor 제외 대상.
+# trending은 catch-all이지만 키워드 매칭이 아닌 fallback이라 여기 포함하지 않음.
 KEYWORD_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
 
 # 클러스터 노이즈에서 강제로 제외되는 단어 — generic하지만 섹터 구분에 필수.
@@ -126,7 +136,7 @@ NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
 # 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
 # claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
 # 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
-NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra", "trending"}
 ANTHROPIC_SOURCE_FAMILY = "anthropic"  # _source_family("anthropic_releases")
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
@@ -200,7 +210,7 @@ def assign_sector(item: dict) -> str | None:
     2. source=anthropic_releases + URL에 'claude.com/blog' → anthropic_blog
     3. 4개 pillar 순회 (claude_code → agents → local_llm → ai_infra):
        include 키워드 히트 AND deny 키워드 미스 → 해당 pillar
-    4. 매칭 없음 → None (제외)
+    4. 매칭 없음 → "trending" catch-all 섹터
     """
     source = item.get("source", "")
     url = item.get("url", "").lower()
@@ -222,7 +232,7 @@ def assign_sector(item: dict) -> str | None:
         if any(dkw in text for dkw in deny):
             continue
         return name
-    return None
+    return "trending"
 
 
 # ── 클러스터 노이즈 ─────────────────────────────────────────
@@ -549,7 +559,7 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
 
     for name, cfg in SECTORS:
         group = grouped.get(name, [])
-        if name in KEYWORD_SECTORS:
+        if name in KEYWORD_SECTORS or cfg.get("catch_all"):
             group = [
                 it for it in group
                 if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES

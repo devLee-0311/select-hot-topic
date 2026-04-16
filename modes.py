@@ -34,7 +34,7 @@ SECTOR_CONFIG = ModeConfig(
     label="섹터별 핫토픽",
     banner_text=(
         "[bold]섹터별 핫토픽 파인더[/]\n"
-        "5개 섹터 × 5개 = 25개 주제 (Claude / Codex / 로컬LLM / 공식뉴스 / 공식블로그)"
+        "7개 섹터 × 5개 = 35개 주제 (Claude / 에이전트 / 로컬LLM / AI인프라 / 트렌딩 / 공식뉴스·블로그)"
     ),
     fetchers={
         "Anthropic Releases": fetch_anthropic_releases,
