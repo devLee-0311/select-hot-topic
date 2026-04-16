@@ -15,7 +15,6 @@ KEYWORDS = [
     "devtools", "developer-tools", "cli-tool", "terminal", "ide",
     "linter", "formatter", "bundler", "build-tool", "monorepo",
     "dx", "developer-experience", "productivity",
-    "image-generation", "text-to-image", "duct-tape",
 ]
 TIMEOUT = 10
 
