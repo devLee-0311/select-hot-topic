@@ -162,7 +162,7 @@ RECENCY_BUCKETS: list[tuple[float | None, float]] = [
 ]
 
 CLUSTER_SIMILARITY_THRESHOLD = 0.45  # 섹터 노이즈 제거 후 짧아진 문자열용
-CLUSTER_MIN_SHARED_KEYWORDS = 1      # 섹터 키워드는 빼고 1개 이상 공유
+CLUSTER_MIN_SHARED_KEYWORDS = 2      # 섹터 키워드 빼고 2개 이상 공유해야 클러스터
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────
@@ -307,9 +307,12 @@ def detect_clusters(items: list[dict]) -> tuple[list[dict], list[dict]]:
     clusters_members: list[list[int]] = []
 
     def _url_linked(i: int, j: int) -> bool:
-        url_i = items[i].get("url", "")
-        url_j = items[j].get("url", "")
-        return bool(url_i and url_j and (url_i in url_j or url_j in url_i))
+        url_i = items[i].get("url", "").rstrip("/")
+        url_j = items[j].get("url", "").rstrip("/")
+        if not url_i or not url_j:
+            return False
+        # 정확 일치: 부분 문자열 매칭은 무관한 글을 엮는 오류 발생
+        return url_i == url_j
 
     def _pair_linked(i: int, j: int) -> bool:
         if _url_linked(i, j):
@@ -605,8 +608,18 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
                 if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
             ]
         group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
+        # 같은 클러스터 소속 아이템 중복 제거 (최고 점수만 유지)
+        seen_clusters: set[int] = set()
+        deduped: list[dict] = []
+        for it in group:
+            cid = it.get("cluster_id")
+            if cid is not None and cid in seen_clusters:
+                continue
+            if cid is not None:
+                seen_clusters.add(cid)
+            deduped.append(it)
         count = sector_counts_override.get(name, cfg.get("count", 5))
-        sectors_out[name] = group[:count]
+        sectors_out[name] = deduped[:count]
 
     # 7. cluster_refs 부착
     for name, sector_items in sectors_out.items():
