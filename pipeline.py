@@ -89,8 +89,6 @@ SECTORS: list[tuple[str, dict]] = [
                 "codex", "gpt-5", "gpt5", "sora", "chatgpt", "cursor",
                 "windsurf", "copilot", "aider", "continue.dev",
                 "openrouter", "vercel ai", "openai",
-                "duct-tape", "duct tape", "gpt-image", "gpt image",
-                "image generat", "dall-e", "dalle",
             ],
             "deny": [],
             "count": 5,
