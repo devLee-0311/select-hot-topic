@@ -10,6 +10,7 @@ QUERIES = [
     "claude code", "anthropic claude code", "claude code tutorial",
     "LLM tutorial 2026", "AI coding agent", "openai gpt new",
     "developer tools 2026", "best dev tools",
+    "duct tape AI model", "gpt image generation", "AI image generation 2026",
 ]
 TIMEOUT = 10
 
