@@ -19,7 +19,7 @@ SECTORS: list[tuple[str, dict]] = [
             "label": "Anthropic 공식 뉴스",
             "emoji": "📰",
             "match_url": "anthropic.com/news",
-            "count": 5,
+            "count": 2,
         },
     ),
     (
@@ -28,7 +28,7 @@ SECTORS: list[tuple[str, dict]] = [
             "label": "Anthropic 공식 블로그",
             "emoji": "📝",
             "match_url": "claude.com/blog",
-            "count": 5,
+            "count": 3,
         },
     ),
     (

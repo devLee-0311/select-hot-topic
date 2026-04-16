@@ -1009,11 +1009,12 @@ def test_format_sector_html_returns_list():
 
 
 def test_format_sector_html_length_matches_sectors():
-    """format_sector_html returns exactly len(SECTORS) chunks even with empty sectors."""
+    """format_sector_html returns len(SECTORS)-1 chunks (anthropic_news+blog merged)."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    assert len(chunks) == len(SECTORS)
+    # anthropic_news + anthropic_blog가 하나로 병합되어 len(SECTORS) - 1
+    assert len(chunks) == len(SECTORS) - 1
 
 
 def test_format_sector_html_empty_sector_has_placeholder():
@@ -1021,20 +1022,33 @@ def test_format_sector_html_empty_sector_has_placeholder():
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    agents_idx = next(i for i, (name, _) in enumerate(SECTORS) if name == "agents")
-    assert "(없음)" in chunks[agents_idx]
+    # anthropic 병합으로 인덱스 오프셋: chunk[0]=anthropic 병합, chunk[1]=claude_code, ...
+    # agents는 SECTORS에서 index 3이지만 병합으로 chunk index 2
+    non_anthropic = [(name, cfg) for name, cfg in SECTORS if name not in {"anthropic_news", "anthropic_blog"}]
+    agents_chunk_idx = next(i for i, (name, _) in enumerate(non_anthropic) if name == "agents") + 1  # +1 for merged anthropic
+    assert "(없음)" in chunks[agents_chunk_idx]
 
 
 def test_format_sector_html_chunk_starts_with_sector_header():
-    """Each chunk begins with the sector's emoji followed by a <b> tag."""
+    """Each chunk begins with an emoji followed by a <b> tag."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    for chunk, (_name, cfg) in zip(chunks, SECTORS):
-        emoji = cfg.get("emoji", "")
-        assert chunk.startswith(f"{emoji} <b>"), (
-            f"Chunk should start with '{emoji} <b>' but got: {chunk[:40]!r}"
+    for chunk in chunks:
+        assert "<b>" in chunk[:20], (
+            f"Chunk should contain '<b>' near start but got: {chunk[:40]!r}"
         )
+
+
+def test_format_sector_html_anthropic_merged():
+    """anthropic_news + anthropic_blog are merged into one chunk."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    anthropic_chunk = chunks[0]
+    assert "📢" in anthropic_chunk
+    assert "📰" in anthropic_chunk
+    assert "📝" in anthropic_chunk
 
 
 def test_format_sector_html_no_break_token_in_any_chunk():
