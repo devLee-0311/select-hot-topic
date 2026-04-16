@@ -100,6 +100,27 @@ SECTORS: list[tuple[str, dict]] = [
             "label": "트렌딩",
             "emoji": "🔥",
             "catch_all": True,
+            "include": [
+                # 넓은 AI/ML 키워드 — 다른 섹터에 안 걸린 AI 토픽 포착용
+                "ai ", " ai", "a.i.", "artificial intellig",
+                "machine learning", "deep learning", "neural net",
+                "llm", "language model", "foundation model",
+                "generat", "diffusion", "image model", "video model",
+                "training", "fine-tun", "inference", "benchmark",
+                "gpu", "nvidia", "tpu", "cuda", "tensor",
+                "robot", "autonomous", "self-driving",
+                "deepmind", "gemini", "gemma",
+                "meta ai", "microsoft ai", "apple intelligence",
+                "bedrock", "sagemaker",
+                "startup", "funding", "series a", "series b", "yc ",
+                "open source", "open-source", "oss ",
+                "api", "sdk", "framework", "developer",
+                "chip", "semiconductor", "hardware",
+                "cloud", "aws", "azure", "gcp",
+                "security", "vulnerability", "exploit", "zero-day",
+                "programming", "compiler", "rust ", "python",
+                "database", "postgres", "redis", "sqlite",
+            ],
             "count": 5,
         },
     ),
@@ -232,7 +253,13 @@ def assign_sector(item: dict) -> str | None:
         if any(dkw in text for dkw in deny):
             continue
         return name
-    return "trending"
+
+    # catch-all: trending 섹터의 넓은 키워드에 매칭되면 trending, 아니면 제외
+    trending_cfg = SECTORS_BY_KEY.get("trending", {})
+    trending_kw = trending_cfg.get("include", [])
+    if trending_kw and any(kw in text for kw in trending_kw):
+        return "trending"
+    return None
 
 
 # ── 클러스터 노이즈 ─────────────────────────────────────────

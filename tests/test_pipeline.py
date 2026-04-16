@@ -182,11 +182,22 @@ def test_assign_sector_anthropic_releases_blog_url():
 
 
 def test_assign_sector_no_match_returns_none():
-    """Item with no matching pillar keyword → 'trending' catch-all."""
+    """Item with no matching keyword (pillar or trending) → None (dropped)."""
     item = {
         "title": "Weekend hiking trail review",
         "source": "reddit_hiking",
         "url": "https://reddit.com/r/hiking/x",
+        "description": "",
+    }
+    assert assign_sector(item) is None
+
+
+def test_assign_sector_trending_broad_ai_keyword():
+    """Item matching trending broad AI keyword → 'trending'."""
+    item = {
+        "title": "New NVIDIA H200 GPU benchmarks show 2x inference speed",
+        "source": "hacker_news",
+        "url": "https://nvidia.com/blog",
         "description": "",
     }
     assert assign_sector(item) == "trending"
