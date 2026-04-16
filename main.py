@@ -37,7 +37,7 @@ SOURCE_ICONS = {
     "reddit_machinelearning": "[bold orange1]Reddit ML[/]",
     "reddit_singularity": "[bold orange1]Reddit Singularity[/]",
     "reddit_stablediffusion": "[bold orange1]Reddit StableDiff[/]",
-    "reddit_chatgpt": "[bold orange1]Reddit ChatGPT[/]",
+
     "reddit_promptengineering": "[bold orange1]Reddit PromptEng[/]",
     "github_trending": "[bold white]GitHub[/]",
     "hacker_news": "[bold yellow]HN[/]",
