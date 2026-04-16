@@ -327,39 +327,69 @@ def _anthropic_output(kind: str = "all") -> tuple[str, list[dict]]:
 
     raw = fetch_anthropic_releases()
 
+    blog_all = [i for i in raw if "claude.com/blog" in i["url"]]
+    news_all = [i for i in raw if "anthropic.com/news" in i["url"]]
+
+    def _fmt_items(items, start=1):
+        result = []
+        for idx, item in enumerate(items, start):
+            title = esc(item["title"])
+            url = esc(item["url"])
+            date_str = ""
+            if item.get("published_at"):
+                date_str = f" ({item['published_at'].strftime('%Y-%m-%d')})"
+            result.append(f"<b>{idx}.</b> <a href=\"{url}\">{title}</a>{date_str}")
+            desc_ko = item.get("description_ko", "")
+            if desc_ko:
+                result.append(f"  {esc(desc_ko)}")
+            else:
+                desc = item.get("description", "")
+                if desc and desc != item["title"]:
+                    if len(desc) > 120:
+                        desc = desc[:117] + "..."
+                    result.append(f"  {esc(desc)}")
+        return result
+
     if kind == "blog":
-        items = [i for i in raw if "claude.com/blog" in i["url"]][:4]
-        header = "📝 <b>Anthropic 블로그</b>"
-    elif kind == "news":
-        items = [i for i in raw if "anthropic.com/news" in i["url"]][:4]
-        header = "📰 <b>Anthropic 뉴스</b>"
-    else:
-        blog = [i for i in raw if "claude.com/blog" in i["url"]][:4]
-        news = [i for i in raw if "anthropic.com/news" in i["url"]][:3]
-        items = blog + news
-        header = "📢 <b>Anthropic 공식</b>"
+        items = blog_all[:3]
+        if not items:
+            return "📝 <b>Anthropic 블로그</b>\n\n데이터 없음", []
+        items = _translate_descriptions(items)
+        lines = ["📝 <b>Anthropic 블로그 (최신 3개)</b>", ""]
+        lines.extend(_fmt_items(items))
+        return "\n".join(lines), items
 
-    if not items:
-        return f"{header}\n\n데이터 없음", []
+    if kind == "news":
+        items = news_all[:2]
+        if not items:
+            return "📰 <b>Anthropic 뉴스</b>\n\n데이터 없음", []
+        items = _translate_descriptions(items)
+        lines = ["📰 <b>Anthropic 뉴스 (최신 2개)</b>", ""]
+        lines.extend(_fmt_items(items))
+        return "\n".join(lines), items
 
-    items = _translate_descriptions(items)
+    # kind == "all": 뉴스 2개 + 블로그 3개 섹션 분리
+    news = news_all[:2]
+    blog = blog_all[:3]
+    all_items = news + blog
 
-    lines = [header, ""]
-    for item in items:
-        title = esc(item["title"])
-        url = esc(item["url"])
-        lines.append(f"• <a href=\"{url}\">{title}</a>")
-        desc_ko = item.get("description_ko", "")
-        if desc_ko:
-            lines.append(f"  {esc(desc_ko)}")
-        else:
-            desc = item.get("description", "")
-            if desc and desc != item["title"]:
-                if len(desc) > 120:
-                    desc = desc[:117] + "..."
-                lines.append(f"  {esc(desc)}")
+    if not all_items:
+        return "📢 <b>Anthropic 공식</b>\n\n데이터 없음", []
 
-    return "\n".join(lines), items
+    all_items = _translate_descriptions(all_items)
+    news_t = all_items[:len(news)]
+    blog_t = all_items[len(news):]
+
+    lines = ["📢 <b>Anthropic 공식 — 최신 뉴스 &amp; 블로그</b>", ""]
+    lines.append("📰 <b>뉴스 (최신 2개)</b>")
+    lines.append("")
+    lines.extend(_fmt_items(news_t))
+    lines.append("")
+    lines.append("📝 <b>블로그 (최신 3개)</b>")
+    lines.append("")
+    lines.extend(_fmt_items(blog_t))
+
+    return "\n".join(lines), all_items
 
 
 def format_anthropic_html(kind: str = "all") -> str:
