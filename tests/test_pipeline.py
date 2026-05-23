@@ -162,25 +162,27 @@ def test_assign_sector_deny_excludes_claude_code_from_agents():
 
 
 def test_assign_sector_anthropic_releases_news_url():
-    """source=anthropic_releases with /news/ URL routes to anthropic_news."""
+    """source=anthropic_releases /news/ URL → anthropic_official (kind=news)."""
     item = {
         "title": "New announcement",
         "source": "anthropic_releases",
         "url": "https://www.anthropic.com/news/some-announcement",
         "description": "",
     }
-    assert assign_sector(item) == "anthropic_news"
+    assert assign_sector(item) == "anthropic_official"
+    assert item["official_kind"] == "news"
 
 
 def test_assign_sector_anthropic_releases_blog_url():
-    """source=anthropic_releases with claude.com/blog URL routes to anthropic_blog."""
+    """source=anthropic_releases claude.com/blog URL → anthropic_official (kind=blog)."""
     item = {
         "title": "New blog post",
         "source": "anthropic_releases",
         "url": "https://claude.com/blog/some-post",
         "description": "",
     }
-    assert assign_sector(item) == "anthropic_blog"
+    assert assign_sector(item) == "anthropic_official"
+    assert item["official_kind"] == "blog"
 
 
 def test_assign_sector_no_match_returns_none():
@@ -503,7 +505,7 @@ def test_compute_sector_scores_recency_decay_applied():
 def _synthetic_sector_items() -> list[dict]:
     """Synthetic items across all sectors (2 anthropic + 4 pillars + diversify)."""
     return [
-        # anthropic_news (URL-routed)
+        # anthropic_official (news, URL-routed)
         {
             "title": "Anthropic announces new safety research",
             "source": "anthropic_releases",
@@ -511,7 +513,7 @@ def _synthetic_sector_items() -> list[dict]:
             "engagement": 0,
             "description": "",
         },
-        # anthropic_blog (URL-routed)
+        # anthropic_official (blog, URL-routed)
         {
             "title": "Building with Claude: best practices",
             "source": "anthropic_releases",
@@ -585,14 +587,100 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_8_sectors():
-    """run_sector_pipeline returns all 8 sectors (2 anthropic + 4 pillar + 2 diversify)."""
+def test_run_sector_pipeline_returns_7_sectors():
+    """run_sector_pipeline returns all 7 sectors (1 official + 4 pillar + 2 diversify)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 8
+    assert len(expected) == 7
+
+
+def test_anthropic_official_merges_both():
+    """뉴스(anthropic.com/news) + 블로그(claude.com/blog)가 모두 anthropic_official로 묶인다."""
+    items = [
+        {
+            "title": "Official news item one",
+            "source": "anthropic_releases",
+            "url": "https://www.anthropic.com/news/item-one",
+            "engagement": 0,
+            "description": "",
+        },
+        {
+            "title": "Official blog item one",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/item-one",
+            "engagement": 0,
+            "description": "",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    assert "anthropic_news" not in result["sectors"]
+    assert "anthropic_blog" not in result["sectors"]
+    official = result["sectors"]["anthropic_official"]
+    assert len(official) == 2
+    assert {it.get("official_kind") for it in official} == {"news", "blog"}
+
+
+def test_anthropic_official_latest_3_each():
+    """종류별 최신 3개씩만 노출하고, 합친 결과는 published_at 내림차순(최신 먼저)."""
+
+    def _mk(kind: str, idx: int, day: int) -> dict:
+        base = "www.anthropic.com/news" if kind == "news" else "claude.com/blog"
+        return {
+            "title": f"{kind} item number {idx}",
+            "source": "anthropic_releases",
+            "url": f"https://{base}/{kind}-{idx}",
+            "engagement": 0,
+            "description": "",
+            "published_at": datetime(2026, 5, day),
+        }
+
+    # news: days 1..5, blog: days 10..14 → 종류별 최신 3개씩 = 6개
+    items = [_mk("news", i, i) for i in range(1, 6)]
+    items += [_mk("blog", i, 9 + i) for i in range(1, 6)]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+
+    assert len(official) == 6
+    news = [it for it in official if it["official_kind"] == "news"]
+    blog = [it for it in official if it["official_kind"] == "blog"]
+    assert len(news) == 3
+    assert len(blog) == 3
+    # 합친 리스트는 최신순(내림차순)
+    dates = [it["published_at"] for it in official]
+    assert dates == sorted(dates, reverse=True)
+    # 가장 최신은 blog(day 14); news는 최신 3개(days 3,4,5)만 살아남음
+    assert official[0]["published_at"] == datetime(2026, 5, 14)
+    assert sorted(it["published_at"].day for it in news) == [3, 4, 5]
+
+
+def test_anthropic_official_handles_missing_dates():
+    """published_at=None 인 아이템도 라우팅되고(가장 뒤로 정렬) 크래시 없음."""
+    items = [
+        {
+            "title": "Dated official news",
+            "source": "anthropic_releases",
+            "url": "https://www.anthropic.com/news/dated",
+            "engagement": 0,
+            "description": "",
+            "published_at": datetime(2026, 5, 20),
+        },
+        {
+            "title": "Undated official blog post",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/undated",
+            "engagement": 0,
+            "description": "",
+            "published_at": None,
+        },
+    ]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+    assert len(official) == 2
+    # 날짜가 있는 뉴스가 먼저, 날짜 없는 블로그가 뒤로
+    assert official[0]["title"] == "Dated official news"
 
 
 def test_run_sector_pipeline_return_keys():
@@ -965,7 +1053,7 @@ def test_anthropic_releases_excluded_from_claude_code_cluster_refs():
 
 
 def test_anthropic_releases_kept_in_anthropic_sector_refs():
-    """anthropic_news 섹터에서는 NON_OFFICIAL_SECTORS 제외 규칙이 적용되지 않아
+    """anthropic_official 섹터에서는 NON_OFFICIAL_SECTORS 제외 규칙이 적용되지 않아
     HN 등 다른 소스가 cluster_refs에 그대로 들어간다."""
     items = [
         {
@@ -984,7 +1072,7 @@ def test_anthropic_releases_kept_in_anthropic_sector_refs():
         },
     ]
     result = run_sector_pipeline(items)
-    news_items = result["sectors"]["anthropic_news"]
+    news_items = result["sectors"]["anthropic_official"]
     assert len(news_items) == 1
     anth = news_items[0]
     if anth.get("cluster_id") is not None:
@@ -1002,7 +1090,7 @@ def _fake_sector_result() -> dict:
     """Construct a synthetic sector display result with items across sectors."""
     return {
         "sectors": {
-            "anthropic_news": [
+            "anthropic_official": [
                 {
                     "title": "Anthropic announces update",
                     "url": "https://www.anthropic.com/news/update",
@@ -1011,9 +1099,8 @@ def _fake_sector_result() -> dict:
                     "cross_source_count": 1,
                     "description": "Anthropic safety update",
                     "cluster_refs": [],
+                    "official_kind": "news",
                 },
-            ],
-            "anthropic_blog": [
                 {
                     "title": "Best practices for Claude",
                     "url": "https://claude.com/blog/best",
@@ -1022,6 +1109,7 @@ def _fake_sector_result() -> dict:
                     "cross_source_count": 1,
                     "description": "Prompting patterns",
                     "cluster_refs": [],
+                    "official_kind": "blog",
                 },
             ],
             "claude_code": [
@@ -1610,23 +1698,24 @@ def test_diversify_enabled_false_when_disabled(monkeypatch):
     assert diversify_enabled() is False
 
 
-def test_rollback_env_var_reverts_to_6_sectors(monkeypatch, tmp_path, capsys):
-    """DISABLE_DIVERSIFY_SECTORS=1 → pipeline yields 6 sectors AND main.py floor is inert.
+def test_rollback_env_var_reverts_to_5_sectors(monkeypatch, tmp_path, capsys):
+    """DISABLE_DIVERSIFY_SECTORS=1 → pipeline yields 5 sectors AND main.py floor is inert.
 
-    Verifies the cross-module gate: both run_sector_pipeline (6 keys, no catch-all)
+    Verifies the cross-module gate: both run_sector_pipeline (5 keys, no catch-all)
     AND the main.py diversity-floor block must be disabled by the same env var.
+    (5 = anthropic_official + 4 pillars; the 2 diversify sectors are removed.)
     """
     monkeypatch.setenv("DISABLE_DIVERSIFY_SECTORS", "1")
 
-    # --- Part 1: pipeline yields 6 sectors, no diversify sectors, catch-all skipped ---
+    # --- Part 1: pipeline yields 5 sectors, no diversify sectors, catch-all skipped ---
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert result["diversify_enabled"] is False
     assert set(result["sectors"].keys()) == {
-        "anthropic_news", "anthropic_blog",
+        "anthropic_official",
         "claude_code", "agents", "local_llm", "ai_infra",
     }
-    assert len(result["sectors"]) == 6
+    assert len(result["sectors"]) == 5
     for diversify_name in DIVERSIFY_SECTORS:
         assert diversify_name not in result["sectors"]
     # The corroborated unrouted pair must NOT be captured (catch-all disabled).
@@ -1682,8 +1771,8 @@ def test_rollback_env_var_reverts_to_6_sectors(monkeypatch, tmp_path, capsys):
         pass
 
     out = capsys.readouterr().out
-    # Output should have exactly 6 sector chunks (delimiter count = 5).
-    assert out.count("@@@SECTOR_BREAK@@@") == 5
+    # Output should have exactly 5 sector chunks (delimiter count = 4).
+    assert out.count("@@@SECTOR_BREAK@@@") == 4
     # Diversify sector labels must not appear.
     assert "AI 뉴스 & 연구" not in out
     assert "AI 트렌딩" not in out
@@ -1874,12 +1963,12 @@ def test_sector_item_counts_logged(caplog):
 # ===========================================================================
 
 
-def test_format_sector_html_8_chunks():
-    """format_sector_html returns exactly 8 chunks (one per sector)."""
+def test_format_sector_html_7_chunks():
+    """format_sector_html returns exactly 7 chunks (one per sector)."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    assert len(chunks) == 8
+    assert len(chunks) == 7
     assert len(chunks) == len(SECTORS)
 
 

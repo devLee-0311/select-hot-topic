@@ -32,21 +32,16 @@ DIVERSIFY_SECTORS = {"ai_news_research", "trending_catch_all"}
 
 SECTORS: list[tuple[str, dict]] = [
     (
-        "anthropic_news",
+        # 공식 뉴스 + 블로그를 하나의 섹터로 통합. final_score가 아니라 published_at
+        # 최신순으로, 종류(news/blog)별 per_kind_limit개씩만 노출 (recency_sort).
+        # URL 라우팅은 assign_sector()에서 처리 (anthropic.com/news, claude.com/blog).
+        "anthropic_official",
         {
-            "label": "Anthropic 공식 뉴스",
+            "label": "Anthropic 공식 뉴스 & 블로그",
             "emoji": "📰",
-            "match_url": "anthropic.com/news",
-            "count": 5,
-        },
-    ),
-    (
-        "anthropic_blog",
-        {
-            "label": "Anthropic 공식 블로그",
-            "emoji": "📝",
-            "match_url": "claude.com/blog",
-            "count": 5,
+            "recency_sort": True,
+            "per_kind_limit": 3,
+            "count": 6,
         },
     ),
     (
@@ -191,7 +186,7 @@ SOURCE_FAMILY = {
 NON_ANCHOR_SOURCES = {"youtube", "geeknews", "github_trending"}
 
 # anthropic_releases 아이템이 cluster boost나 refs로 "끼어들면 안 되는" 섹터들.
-# 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
+# 이유: anthropic_releases는 anthropic_official 전용 섹터를 따로 갖는다.
 # claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
 # 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
 NON_OFFICIAL_SECTORS = {
@@ -276,10 +271,14 @@ def assign_sector(item: dict) -> str | None:
     url = item.get("url", "").lower()
 
     if source == "anthropic_releases":
+        # 뉴스/블로그 모두 단일 anthropic_official 섹터로. official_kind 태그로
+        # 종류별 최신 3개씩 노출하는 데 사용 (run_sector_pipeline 디스플레이 단계).
         if "anthropic.com/news" in url:
-            return "anthropic_news"
+            item["official_kind"] = "news"
+            return "anthropic_official"
         if "claude.com/blog" in url:
-            return "anthropic_blog"
+            item["official_kind"] = "blog"
+            return "anthropic_official"
 
     text = _searchable_text(item)
     for name, cfg in SECTORS:
@@ -298,6 +297,31 @@ def assign_sector(item: dict) -> str | None:
             continue
         return name
     return None
+
+
+def _published_at_key(item: dict) -> datetime:
+    """published_at(datetime) 정렬 키. None/비-datetime은 가장 뒤(datetime.min)."""
+    pa = item.get("published_at")
+    return pa if isinstance(pa, datetime) else datetime.min
+
+
+def _select_by_recency(group: list[dict], per_kind_limit: int | None) -> list[dict]:
+    """recency_sort 섹터(anthropic_official) 디스플레이 선택.
+
+    official_kind(news/blog)별로 최신 per_kind_limit개씩만 뽑은 뒤 합쳐서
+    published_at 내림차순(최신 먼저)으로 정렬한다. per_kind_limit이 없으면
+    전체를 최신순 정렬만 한다.
+    """
+    if per_kind_limit:
+        by_kind: dict[str | None, list[dict]] = defaultdict(list)
+        for it in group:
+            by_kind[it.get("official_kind")].append(it)
+        picked: list[dict] = []
+        for kind_items in by_kind.values():
+            kind_items.sort(key=_published_at_key, reverse=True)
+            picked.extend(kind_items[:per_kind_limit])
+        return sorted(picked, key=_published_at_key, reverse=True)
+    return sorted(group, key=_published_at_key, reverse=True)
 
 
 # ── 클러스터 노이즈 ─────────────────────────────────────────
@@ -654,9 +678,7 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
                 if it.get("source", "") not in NON_ANCHOR_SOURCES
                 and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
             ]
-        group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-
-        # 7. cluster_refs 부착 — slice 이전 group 전체에 부착하여 floor-backfill된
+        # 7. cluster_refs 부착 — 정렬/slice와 무관하게 group 전체에 부착하여 floor-backfill된
         #    아이템도 related-source 링크를 갖도록 한다 (N1 fix).
         for it in group:
             cid = it.get("cluster_id")
@@ -684,9 +706,15 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
             else:
                 it["cluster_refs"] = []
 
-        sectors_full[name] = group
-        count = sector_counts_override.get(name, cfg.get("count", 5))
-        sectors_out[name] = group[:count]
+        if cfg.get("recency_sort"):
+            # 공식 섹터: final_score 대신 published_at 최신순. 종류별 per_kind_limit개씩.
+            sectors_full[name] = sorted(group, key=_published_at_key, reverse=True)
+            sectors_out[name] = _select_by_recency(group, cfg.get("per_kind_limit"))
+        else:
+            group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
+            sectors_full[name] = group
+            count = sector_counts_override.get(name, cfg.get("count", 5))
+            sectors_out[name] = group[:count]
 
     # 8. max_score 계산 (디스플레이 정규화 앵커)
     #    ranking은 여전히 item["final_score"] 기준. 이 값은 표시용 normalization 앵커로만 사용.
