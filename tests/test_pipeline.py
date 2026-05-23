@@ -82,14 +82,14 @@ def test_assign_sector_langgraph_routes_agents():
 
 
 def test_assign_sector_cursor_codex_unrouted():
-    """'cursor' or 'codex' no longer route anywhere now that ai_infra is removed."""
+    """'cursor' or 'codex' route to ai_infra (re-added on this base)."""
     cursor_item = {
         "title": "Cursor adds codex mode",
         "source": "hacker_news",
         "url": "https://hn.example.com/cursor-codex",
         "description": "",
     }
-    assert assign_sector(cursor_item) is None
+    assert assign_sector(cursor_item) == "ai_infra"
 
     codex_item = {
         "title": "GPT-5 Codex release notes",
@@ -97,18 +97,54 @@ def test_assign_sector_cursor_codex_unrouted():
         "url": "https://hn.example.com/codex",
         "description": "",
     }
-    assert assign_sector(codex_item) is None
+    assert assign_sector(codex_item) == "ai_infra"
 
 
 def test_assign_sector_openai_routes_to_trending():
-    """Item with 'openai' keyword (no claude code / agents) routes to trending sector (ai_infra removed)."""
+    """Item with 'openai' keyword routes to ai_infra (re-added on this base)."""
     item = {
         "title": "OpenAI new feature",
         "source": "hacker_news",
         "url": "https://hn.example.com/openai",
         "description": "",
     }
-    assert assign_sector(item) == "trending"
+    assert assign_sector(item) == "ai_infra"
+
+
+def test_assign_sector_ai_infra_cursor():
+    """'cursor' keyword routes to ai_infra sector (re-added)."""
+    item = {
+        "title": "Cursor 1.0 ships agent mode",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/cursor",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_infra"
+
+
+def test_assign_sector_ai_news_research_pure_research():
+    """Pure research item (arxiv/benchmark, no tool keyword) routes to ai_news_research."""
+    item = {
+        "title": "New arxiv paper sets SOTA benchmark on reasoning",
+        "source": "hacker_news",
+        "url": "https://arxiv.org/abs/1234",
+        "description": "preprint scaling law foundation model",
+    }
+    assert assign_sector(item) == "ai_news_research"
+
+
+def test_assign_sector_tool_wins_over_ai_news_research():
+    """First-match-wins: a tool keyword (cursor) beats ai_news_research even with research words.
+
+    'cursor' matches ai_infra (earlier in SECTORS) so the item never reaches ai_news_research.
+    """
+    item = {
+        "title": "Cursor adds arxiv paper search benchmark",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/cursor-arxiv",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_infra"
 
 
 def test_assign_sector_ollama_routes_local_llm():
@@ -160,25 +196,27 @@ def test_assign_sector_deny_excludes_claude_code_from_agents():
 
 
 def test_assign_sector_anthropic_releases_news_url():
-    """source=anthropic_releases with /news/ URL routes to anthropic_news."""
+    """source=anthropic_releases with /news/ URL routes to anthropic_official, tagged news."""
     item = {
         "title": "New announcement",
         "source": "anthropic_releases",
         "url": "https://www.anthropic.com/news/some-announcement",
         "description": "",
     }
-    assert assign_sector(item) == "anthropic_news"
+    assert assign_sector(item) == "anthropic_official"
+    assert item["official_kind"] == "news"
 
 
 def test_assign_sector_anthropic_releases_blog_url():
-    """source=anthropic_releases with claude.com/blog URL routes to anthropic_blog."""
+    """source=anthropic_releases with claude.com/blog URL routes to anthropic_official, tagged blog."""
     item = {
         "title": "New blog post",
         "source": "anthropic_releases",
         "url": "https://claude.com/blog/some-post",
         "description": "",
     }
-    assert assign_sector(item) == "anthropic_blog"
+    assert assign_sector(item) == "anthropic_official"
+    assert item["official_kind"] == "blog"
 
 
 def test_assign_sector_no_match_returns_none():
@@ -193,9 +231,13 @@ def test_assign_sector_no_match_returns_none():
 
 
 def test_assign_sector_trending_broad_ai_keyword():
-    """Item matching trending broad AI keyword → 'trending'."""
+    """Item matching a trending-only broad keyword (no tool/research keyword) → 'trending'.
+
+    Uses 'nvidia'/'gpu' which are trending-only; avoids 'benchmark' (now owned by
+    ai_news_research) so this still falls through to the trending catch-all.
+    """
     item = {
-        "title": "New NVIDIA H200 GPU benchmarks show 2x inference speed",
+        "title": "New NVIDIA H200 GPU shows 2x faster throughput",
         "source": "hacker_news",
         "url": "https://nvidia.com/blog",
         "description": "",
@@ -509,9 +551,9 @@ def test_compute_sector_scores_recency_decay_applied():
 
 
 def _synthetic_sector_items() -> list[dict]:
-    """Synthetic items across all sectors (2 anthropic + 4 pillars)."""
+    """Synthetic items across all sectors (anthropic_official news+blog + 4 pillars)."""
     return [
-        # anthropic_news (URL-routed)
+        # anthropic_official — news (URL-routed)
         {
             "title": "Anthropic announces new safety research",
             "source": "anthropic_releases",
@@ -519,7 +561,7 @@ def _synthetic_sector_items() -> list[dict]:
             "engagement": 0,
             "description": "",
         },
-        # anthropic_blog (URL-routed)
+        # anthropic_official — blog (URL-routed)
         {
             "title": "Building with Claude: best practices",
             "source": "anthropic_releases",
@@ -570,14 +612,14 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_all_6_sectors():
-    """run_sector_pipeline returns all 6 sectors (2 anthropic + 3 pillar + trending)."""
+def test_run_sector_pipeline_returns_all_7_sectors():
+    """run_sector_pipeline returns all 7 sectors (anthropic_official + 5 pillar + trending)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 6
+    assert len(expected) == 7
 
 
 def test_run_sector_pipeline_return_keys():
@@ -626,6 +668,84 @@ def test_run_sector_pipeline_empty_input():
     assert result["all_scored"] == []
     assert result["clusters"] == []
     assert result["max_score"] >= 1.0
+
+
+def _anthropic_item(kind: str, days_ago: int, title: str) -> dict:
+    """anthropic_releases item with a published_at `days_ago` in the past.
+
+    kind: 'news' → anthropic.com/news URL; 'blog' → claude.com/blog URL.
+    """
+    base = "https://www.anthropic.com/news" if kind == "news" else "https://claude.com/blog"
+    return {
+        "title": title,
+        "source": "anthropic_releases",
+        "url": f"{base}/{title.lower().replace(' ', '-')}",
+        "engagement": 0,
+        "description": "",
+        "published_at": datetime.now() - timedelta(days=days_ago),
+    }
+
+
+def test_anthropic_official_merges_both_kinds():
+    """anthropic_official holds both news and blog items in one sector."""
+    items = [
+        _anthropic_item("news", 1, "News one"),
+        _anthropic_item("blog", 2, "Blog one"),
+    ]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+    kinds = {it.get("official_kind") for it in official}
+    assert kinds == {"news", "blog"}
+    assert len(official) == 2
+
+
+def test_anthropic_official_latest_3_each_kind():
+    """anthropic_official keeps at most 3 latest news + 3 latest blog (per_kind_limit=3)."""
+    items = [_anthropic_item("news", d, f"News {d}") for d in range(5)]
+    items += [_anthropic_item("blog", d, f"Blog {d}") for d in range(5)]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+    news = [it for it in official if it.get("official_kind") == "news"]
+    blog = [it for it in official if it.get("official_kind") == "blog"]
+    assert len(news) == 3
+    assert len(blog) == 3
+    # The 3 newest news (days_ago 0,1,2) are kept; the older ones (3,4) dropped.
+    news_titles = {it["title"] for it in news}
+    assert news_titles == {"News 0", "News 1", "News 2"}
+
+
+def test_anthropic_official_recency_order_newest_first():
+    """anthropic_official items are ordered by published_at descending (newest first)."""
+    items = [
+        _anthropic_item("news", 10, "Old news"),
+        _anthropic_item("blog", 1, "Fresh blog"),
+        _anthropic_item("news", 5, "Mid news"),
+    ]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+    titles = [it["title"] for it in official]
+    assert titles == ["Fresh blog", "Mid news", "Old news"]
+
+
+def test_anthropic_official_missing_published_at_handled():
+    """Items without published_at sort last (datetime.min) and don't crash the pipeline."""
+    items = [
+        _anthropic_item("news", 1, "Dated news"),
+        {
+            "title": "Undated blog",
+            "source": "anthropic_releases",
+            "url": "https://claude.com/blog/undated",
+            "engagement": 0,
+            "description": "",
+            # no published_at
+        },
+    ]
+    result = run_sector_pipeline(items)
+    official = result["sectors"]["anthropic_official"]
+    assert len(official) == 2
+    # Dated item (newest) comes before the undated one (sorts to datetime.min).
+    assert official[0]["title"] == "Dated news"
+    assert official[-1]["title"] == "Undated blog"
 
 
 def test_run_sector_pipeline_youtube_excluded_from_keyword_sector():
@@ -842,11 +962,12 @@ def test_non_anchor_sources_exported():
 
 
 def test_non_official_sectors_exported():
-    """NON_OFFICIAL_SECTORS covers all 3 pillar sectors."""
+    """NON_OFFICIAL_SECTORS covers all keyword pillar sectors + trending."""
     assert "claude_code" in NON_OFFICIAL_SECTORS
     assert "agents" in NON_OFFICIAL_SECTORS
     assert "local_llm" in NON_OFFICIAL_SECTORS
-    assert "ai_infra" not in NON_OFFICIAL_SECTORS
+    assert "ai_infra" in NON_OFFICIAL_SECTORS
+    assert "ai_news_research" in NON_OFFICIAL_SECTORS
 
 
 def test_anthropic_releases_excluded_from_claude_code_sector_boost():
@@ -905,7 +1026,7 @@ def test_anthropic_releases_excluded_from_claude_code_cluster_refs():
 
 
 def test_anthropic_releases_kept_in_anthropic_sector_refs():
-    """anthropic_news 섹터에서는 NON_OFFICIAL_SECTORS 제외 규칙이 적용되지 않아
+    """anthropic_official 섹터에서는 NON_OFFICIAL_SECTORS 제외 규칙이 적용되지 않아
     HN 등 다른 소스가 cluster_refs에 그대로 들어간다."""
     items = [
         {
@@ -924,9 +1045,9 @@ def test_anthropic_releases_kept_in_anthropic_sector_refs():
         },
     ]
     result = run_sector_pipeline(items)
-    news_items = result["sectors"]["anthropic_news"]
-    assert len(news_items) == 1
-    anth = news_items[0]
+    official_items = result["sectors"]["anthropic_official"]
+    assert len(official_items) == 1
+    anth = official_items[0]
     if anth.get("cluster_id") is not None:
         ref_sources = [r["source"] for r in anth.get("cluster_refs", [])]
         assert "hacker_news" in ref_sources
@@ -942,7 +1063,7 @@ def _fake_sector_result() -> dict:
     """Construct a synthetic sector display result with items across sectors."""
     return {
         "sectors": {
-            "anthropic_news": [
+            "anthropic_official": [
                 {
                     "title": "Anthropic announces update",
                     "url": "https://www.anthropic.com/news/update",
@@ -950,10 +1071,9 @@ def _fake_sector_result() -> dict:
                     "final_score": 4.0,
                     "cross_source_count": 1,
                     "description": "Anthropic safety update",
+                    "official_kind": "news",
                     "cluster_refs": [],
                 },
-            ],
-            "anthropic_blog": [
                 {
                     "title": "Best practices for Claude",
                     "url": "https://claude.com/blog/best",
@@ -961,6 +1081,7 @@ def _fake_sector_result() -> dict:
                     "final_score": 3.5,
                     "cross_source_count": 1,
                     "description": "Prompting patterns",
+                    "official_kind": "blog",
                     "cluster_refs": [],
                 },
             ],
@@ -994,6 +1115,7 @@ def _fake_sector_result() -> dict:
                 },
             ],
             "ai_infra": [],
+            "ai_news_research": [],
         },
     }
 
@@ -1008,12 +1130,12 @@ def test_format_sector_html_returns_list():
 
 
 def test_format_sector_html_length_matches_sectors():
-    """format_sector_html returns len(SECTORS)-1 chunks (anthropic_news+blog merged)."""
+    """format_sector_html returns one chunk per sector (anthropic_official is single)."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    # anthropic_news + anthropic_blog가 하나로 병합되어 len(SECTORS) - 1
-    assert len(chunks) == len(SECTORS) - 1
+    # anthropic_official이 단일 섹터라 SECTORS와 1:1 대응 (7개).
+    assert len(chunks) == len(SECTORS)
 
 
 def test_format_sector_html_empty_sector_has_placeholder():
@@ -1021,10 +1143,8 @@ def test_format_sector_html_empty_sector_has_placeholder():
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
-    # anthropic 병합으로 인덱스 오프셋: chunk[0]=anthropic 병합, chunk[1]=claude_code, ...
-    # agents는 SECTORS에서 index 3이지만 병합으로 chunk index 2
-    non_anthropic = [(name, cfg) for name, cfg in SECTORS if name not in {"anthropic_news", "anthropic_blog"}]
-    agents_chunk_idx = next(i for i, (name, _) in enumerate(non_anthropic) if name == "agents") + 1  # +1 for merged anthropic
+    # 청크는 SECTORS 순서와 1:1 대응. agents는 비어 있으므로 '(없음)'.
+    agents_chunk_idx = next(i for i, (name, _) in enumerate(SECTORS) if name == "agents")
     assert "(없음)" in chunks[agents_chunk_idx]
 
 
@@ -1039,15 +1159,18 @@ def test_format_sector_html_chunk_starts_with_sector_header():
         )
 
 
-def test_format_sector_html_anthropic_merged():
-    """anthropic_news + anthropic_blog are merged into one chunk."""
+def test_format_sector_html_anthropic_single_chunk():
+    """anthropic_official renders as a single chunk holding both news and blog items."""
     from main import format_sector_html
 
     chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
     anthropic_chunk = chunks[0]
-    assert "📢" in anthropic_chunk
+    # 섹터 이모지 + 라벨
     assert "📰" in anthropic_chunk
-    assert "📝" in anthropic_chunk
+    assert "Anthropic 공식" in anthropic_chunk
+    # 뉴스 + 블로그 아이템이 한 청크 안에 모두 들어간다.
+    assert "Anthropic announces update" in anthropic_chunk
+    assert "Best practices for Claude" in anthropic_chunk
 
 
 def test_format_sector_html_no_break_token_in_any_chunk():

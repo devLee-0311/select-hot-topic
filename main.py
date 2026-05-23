@@ -180,7 +180,7 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
     """run_sector_pipeline() 결과를 Telegram HTML 섹터별 청크 리스트로 변환.
 
     각 청크 = 단일 섹터의 독립적인 HTML 메시지 (자체 헤더 + 아이템).
-    anthropic_news + anthropic_blog는 하나의 청크로 병합한다.
+    anthropic_official은 뉴스/블로그를 합친 단일 섹터라 그대로 하나의 청크가 된다.
     mode_label은 하위 호환을 위해 남겨두었지만 현재 출력에는 사용하지 않는다.
     """
     del mode_label  # 각 청크가 독립 메시지이므로 전체 래퍼 헤더는 출력하지 않음
@@ -189,10 +189,6 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
 
     sectors = result.get("sectors", {})
     chunks: list[str] = []
-
-    # anthropic_news + anthropic_blog를 하나의 청크로 병합
-    ANTHROPIC_MERGE = {"anthropic_news", "anthropic_blog"}
-    anthropic_chunk_parts: list[str] = []
 
     for name, cfg in SECTORS:
         emoji = cfg.get("emoji", "")
@@ -247,20 +243,9 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
 
         text = "\n".join(lines).rstrip()
 
-        if name in ANTHROPIC_MERGE:
-            anthropic_chunk_parts.append(text)
-            # anthropic_blog가 마지막 병합 대상이므로 여기서 합쳐서 청크에 추가
-            if name == "anthropic_blog":
-                merged = "\n\n".join(anthropic_chunk_parts)
-                header = "📢 <b>Anthropic 공식</b>\n\n"
-                merged = header + merged
-                if len(merged) > 4000:
-                    merged = merged[:3997] + "..."
-                chunks.append(merged)
-        else:
-            if len(text) > 4000:
-                text = text[:3997] + "..."
-            chunks.append(text)
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+        chunks.append(text)
 
     return chunks
 

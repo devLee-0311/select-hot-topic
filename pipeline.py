@@ -14,21 +14,16 @@ from utils import clean_for_compare, similarity
 
 SECTORS: list[tuple[str, dict]] = [
     (
-        "anthropic_news",
+        # 공식 뉴스 + 블로그를 하나의 섹터로 통합. final_score가 아니라 published_at
+        # 최신순으로, 종류(news/blog)별 per_kind_limit개씩만 노출 (recency_sort).
+        # URL 라우팅은 assign_sector()에서 처리 (anthropic.com/news, claude.com/blog).
+        "anthropic_official",
         {
-            "label": "Anthropic 공식 뉴스",
+            "label": "Anthropic 공식 뉴스 & 블로그",
             "emoji": "📰",
-            "match_url": "anthropic.com/news",
-            "count": 2,
-        },
-    ),
-    (
-        "anthropic_blog",
-        {
-            "label": "Anthropic 공식 블로그",
-            "emoji": "📝",
-            "match_url": "claude.com/blog",
-            "count": 3,
+            "recency_sort": True,
+            "per_kind_limit": 3,
+            "count": 6,
         },
     ),
     (
@@ -81,6 +76,50 @@ SECTORS: list[tuple[str, dict]] = [
         },
     ),
     (
+        "ai_infra",
+        {
+            "label": "AI 인프라 / 툴링",
+            "emoji": "⚙️",
+            "include": [
+                "codex", "gpt-5", "gpt5", "sora", "chatgpt", "cursor",
+                "windsurf", "copilot", "aider", "continue.dev",
+                "openrouter", "vercel ai", "openai",
+            ],
+            "deny": [],
+            "count": 5,
+        },
+    ),
+    (
+        # 4개 tool 섹터 뒤에 위치 — tool 키워드 우선 매칭 후 남은
+        # 순수 연구/뉴스 아이템만 여기로 떨어진다 (zero tool-item leakage).
+        "ai_news_research",
+        {
+            "label": "AI 뉴스 & 연구",
+            "emoji": "🔬",
+            "include": [
+                # Research signals
+                "paper", "arxiv", "benchmark", "sota", "state of the art",
+                "preprint", "fine-tuning", "fine tuning", "finetuning",
+                "multimodal", "vision language",
+                "reasoning model", "chain of thought", "reward model",
+                "rlhf", "dpo", "grpo", "constitutional ai",
+                "scaling law", "context window", "long context",
+                "moe", "mixture of experts", "distillation",
+                "open source model", "open weight", "foundation model",
+                "논문", "연구", "벤치마크", "멀티모달",
+                # News/industry signals
+                "ai regulation", "ai policy", "ai safety", "ai ethics",
+                "ai startup", "ai funding", "ai acquisition",
+                "ai legislation", "ai governance",
+                "ai copyright", "ai lawsuit", "ai ban", "ai risk",
+                "superintelligence", "agi", "alignment",
+                "ai 규제", "ai 정책", "ai 안전",
+            ],
+            "deny": ["claude code", "cursor", "copilot", "ollama", "lm studio"],
+            "count": 4,
+        },
+    ),
+    (
         "trending",
         {
             "label": "트렌딩",
@@ -116,7 +155,9 @@ SECTORS_BY_KEY: dict[str, dict] = {name: cfg for name, cfg in SECTORS}
 
 # 키워드 기반 섹터 (URL 라우팅이 아닌 섹터) — non-anchor 제외 대상.
 # trending은 catch-all이지만 키워드 매칭이 아닌 fallback이라 여기 포함하지 않음.
-KEYWORD_SECTORS = {"claude_code", "agents", "local_llm"}
+KEYWORD_SECTORS = {
+    "claude_code", "agents", "local_llm", "ai_infra", "ai_news_research",
+}
 
 # 클러스터 노이즈에서 강제로 제외되는 단어 — generic하지만 섹터 구분에 필수.
 # 이 단어들이 SECTOR_CLUSTER_NOISE에 포함되면 클러스터링 신호가 너무 얕아진다.
@@ -140,10 +181,13 @@ SOURCE_FAMILY = {
 NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
 
 # anthropic_releases 아이템이 cluster boost나 refs로 "끼어들면 안 되는" 섹터들.
-# 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
+# 이유: anthropic_releases는 anthropic_official 전용 섹터를 따로 갖는다.
 # claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
 # 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
-NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "trending"}
+NON_OFFICIAL_SECTORS = {
+    "claude_code", "agents", "local_llm", "ai_infra", "ai_news_research",
+    "trending",
+}
 ANTHROPIC_SOURCE_FAMILY = "anthropic"  # _source_family("anthropic_releases")
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
@@ -213,20 +257,24 @@ def _has_cross_source_mention(item: dict, all_items: list[dict]) -> bool:
 def assign_sector(item: dict) -> str | None:
     """아이템을 섹터 키에 매핑. 규칙 순서 준수, 첫 매칭 승리.
 
-    1. source=anthropic_releases + URL에 'anthropic.com/news' → anthropic_news
-    2. source=anthropic_releases + URL에 'claude.com/blog' → anthropic_blog
-    3. 4개 pillar 순회 (claude_code → agents → local_llm → ai_infra):
+    1. source=anthropic_releases + URL에 'anthropic.com/news' or 'claude.com/blog'
+       → anthropic_official (official_kind 태그로 news/blog 구분)
+    2. 5개 pillar 순회 (claude_code → agents → local_llm → ai_infra → ai_news_research):
        include 키워드 히트 AND deny 키워드 미스 → 해당 pillar
-    4. 매칭 없음 → "trending" catch-all 섹터
+    3. 매칭 없음 → "trending" catch-all 섹터
     """
     source = item.get("source", "")
     url = item.get("url", "").lower()
 
     if source == "anthropic_releases":
+        # 뉴스/블로그 모두 단일 anthropic_official 섹터로. official_kind 태그로
+        # 종류별 최신 3개씩 노출하는 데 사용 (run_sector_pipeline 디스플레이 단계).
         if "anthropic.com/news" in url:
-            return "anthropic_news"
+            item["official_kind"] = "news"
+            return "anthropic_official"
         if "claude.com/blog" in url:
-            return "anthropic_blog"
+            item["official_kind"] = "blog"
+            return "anthropic_official"
 
     text = _searchable_text(item)
     for name, cfg in SECTORS:
@@ -246,6 +294,31 @@ def assign_sector(item: dict) -> str | None:
     if trending_kw and any(kw in text for kw in trending_kw):
         return "trending"
     return None
+
+
+def _published_at_key(item: dict) -> datetime:
+    """published_at(datetime) 정렬 키. None/비-datetime은 가장 뒤(datetime.min)."""
+    pa = item.get("published_at")
+    return pa if isinstance(pa, datetime) else datetime.min
+
+
+def _select_by_recency(group: list[dict], per_kind_limit: int | None) -> list[dict]:
+    """recency_sort 섹터(anthropic_official) 디스플레이 선택.
+
+    official_kind(news/blog)별로 최신 per_kind_limit개씩만 뽑은 뒤 합쳐서
+    published_at 내림차순(최신 먼저)으로 정렬한다. per_kind_limit이 없으면
+    전체를 최신순 정렬만 한다.
+    """
+    if per_kind_limit:
+        by_kind: dict[str | None, list[dict]] = defaultdict(list)
+        for it in group:
+            by_kind[it.get("official_kind")].append(it)
+        picked: list[dict] = []
+        for kind_items in by_kind.values():
+            kind_items.sort(key=_published_at_key, reverse=True)
+            picked.extend(kind_items[:per_kind_limit])
+        return sorted(picked, key=_published_at_key, reverse=True)
+    return sorted(group, key=_published_at_key, reverse=True)
 
 
 # ── 클러스터 노이즈 ─────────────────────────────────────────
@@ -607,6 +680,11 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
                 it for it in group
                 if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
             ]
+        if cfg.get("recency_sort"):
+            # 공식 섹터(anthropic_official): final_score가 아니라 published_at 최신순.
+            # 종류(news/blog)별 per_kind_limit개씩 뽑아 합친 뒤 최신순 정렬.
+            sectors_out[name] = _select_by_recency(group, cfg.get("per_kind_limit"))
+            continue
         group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
         # 같은 클러스터 소속 아이템 중복 제거 (최고 점수만 유지)
         seen_clusters: set[int] = set()
