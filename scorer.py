@@ -4,8 +4,7 @@ import time
 from datetime import datetime
 
 from utils import (
-    stem, clean_for_compare, similarity, is_related, url_same_article,
-    NOISE_WORDS, CONTEXT_NOISE, RELATED_THRESHOLD, MIN_SHARED_KEYWORDS,
+    is_related, url_same_article,
 )
 
 
@@ -64,7 +63,6 @@ def score_topics(all_items: list[dict], top_n: int = 5, weights: dict | None = N
         # 다른 소스에서 관련 자료 찾기
         related = []
         anchor_title = anchor.get("title", "")
-        anchor_source = anchor["source"]
 
         for candidate in sorted_items:
             if candidate is anchor:

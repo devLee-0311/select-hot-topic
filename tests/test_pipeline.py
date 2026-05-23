@@ -336,8 +336,8 @@ def test_detect_clusters_url_match():
 def test_detect_clusters_title_similarity():
     """2 items with nearly identical titles from different sources cluster together."""
     items = [
-        {"title": "Claude model context protocol deep dive", "source": "hacker_news", "engagement": 50, "url": "https://hn.example.com/mcp", "description": ""},
-        {"title": "Claude model context protocol deep dive review", "source": "reddit_localllama", "engagement": 30, "url": "https://reddit.com/mcp", "description": ""},
+        {"title": "Hugging Face dataset hub redesign announced", "source": "hacker_news", "engagement": 50, "url": "https://hn.example.com/hf-hub", "description": ""},
+        {"title": "Hugging Face dataset hub redesign rolled out", "source": "reddit_localllama", "engagement": 30, "url": "https://reddit.com/hf-hub", "description": ""},
     ]
     result_items, _clusters = detect_clusters(items)
     assert result_items[0]["cluster_id"] is not None
@@ -385,11 +385,12 @@ def test_titles_cluster_excludes_sector_keywords():
 def test_titles_cluster_real_cluster_still_detected():
     """Real clusters must still be detected after noise stripping.
 
-    Both titles share 'subagents' + 'feature' and have high similarity after noise is stripped.
+    Both titles share multiple non-sector keywords (hugging/face/dataset/platform/launch)
+    and have high similarity after sector-noise is stripped — clears the 2-keyword bar.
     """
     assert _titles_cluster(
-        "Claude Code adds new subagents feature",
-        "Claude Code subagents feature released",
+        "Hugging Face launches new dataset platform",
+        "Hugging Face launches dataset platform update",
     )
 
 
