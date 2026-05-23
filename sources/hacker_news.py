@@ -10,6 +10,10 @@ QUERIES = [
     "claude code", "anthropic claude", "claude AI", "MCP server",
     "LLM", "OpenAI GPT", "AI agent", "AI coding",
     "developer tools", "devtools CLI",
+    # AI 연구/뉴스 커버리지 (Phase 2 rebalancing — 기존 쿼리 유지)
+    "AI research paper", "machine learning breakthrough",
+    "AI regulation policy", "AI safety alignment",
+    "multimodal AI", "foundation model",
 ]
 TIMEOUT = 10
 

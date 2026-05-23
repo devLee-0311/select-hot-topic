@@ -15,6 +15,10 @@ KEYWORDS = [
     "devtools", "developer-tools", "cli-tool", "terminal", "ide",
     "linter", "formatter", "bundler", "build-tool", "monorepo",
     "dx", "developer-experience", "productivity",
+    # AI 연구/뉴스 term (Phase 2 rebalancing — 기존 키워드 유지)
+    "paper", "benchmark", "arxiv", "multimodal",
+    "reasoning", "fine-tuning", "safety", "alignment",
+    "foundation-model", "research",
 ]
 TIMEOUT = 10
 

@@ -705,6 +705,51 @@ def test_run_sector_pipeline_geeknews_excluded_from_keyword_sector():
     assert "geeknews" not in sources
 
 
+def test_github_trending_excluded_from_keyword_sector():
+    """Phase 2: a GitHub-only item (no cross-source mention) does NOT lead a keyword sector."""
+    items = [
+        {
+            "title": "Claude Code solo trending tool",
+            "source": "github_trending",
+            "engagement": 500,
+            "url": "https://github.com/solo-cc-tool",
+            "description": "claude code tool",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    sources = [it["source"] for it in result["sectors"]["claude_code"]]
+    assert "github_trending" not in sources
+    assert result["sectors"]["claude_code"] == []  # github demoted → no anchor
+
+
+def test_github_trending_still_appears_via_hn_anchor():
+    """Phase 2: a GitHub item that also trends on HN still appears (HN anchor, GitHub in refs)."""
+    items = [
+        {
+            "title": "Claude Code mega feature launch",
+            "source": "github_trending",
+            "engagement": 500,
+            "url": "https://example.com/cc-mega",
+            "description": "claude code mega feature",
+        },
+        {
+            "title": "Claude Code mega feature launch",
+            "source": "hacker_news",
+            "engagement": 300,
+            "url": "https://example.com/cc-mega",
+            "description": "claude code mega feature",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    cc = result["sectors"]["claude_code"]
+    # The HN item leads (anchor); github_trending appears only as a ref.
+    assert len(cc) == 1
+    assert cc[0]["source"] == "hacker_news"
+    ref_sources = [r["source"] for r in cc[0].get("cluster_refs", [])]
+    assert "github_trending" in ref_sources
+    assert cc[0]["cross_source_count"] >= 2
+
+
 def test_run_sector_pipeline_all_scored_have_final_score():
     """Every item in all_scored has a final_score."""
     items = _synthetic_sector_items()

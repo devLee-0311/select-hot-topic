@@ -9,6 +9,9 @@ QUERIES = [
     "claude code", "anthropic claude code", "claude code tutorial",
     "LLM tutorial 2026", "AI coding agent", "openai gpt new",
     "developer tools 2026", "best dev tools",
+    # AI 뉴스/연구 커버리지 (Phase 2 rebalancing — 기존 쿼리 유지)
+    "AI news this week", "AI research explained",
+    "machine learning paper", "AI industry update",
 ]
 TIMEOUT = 10
 

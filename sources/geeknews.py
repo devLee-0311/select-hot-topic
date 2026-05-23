@@ -14,6 +14,9 @@ KEYWORDS = [
     "코딩 에이전트", "바이브 코딩", "openai", "gpt", "gemini",
     "devtools", "cli", "개발자 도구", "터미널", "ide",
     "린터", "빌드", "monorepo", "developer tool", "생산성",
+    # AI 뉴스/연구 term (Phase 2 rebalancing — 기존 키워드 유지)
+    "ai 규제", "ai 안전", "논문", "연구", "멀티모달",
+    "ai regulation", "ai safety", "benchmark", "paper",
 ]
 TIMEOUT = 10
 

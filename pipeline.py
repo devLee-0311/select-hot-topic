@@ -184,9 +184,11 @@ SOURCE_FAMILY = {
 }
 
 # Sources that can contribute to cross_source_count and refs, but cannot be anchor items.
-# Rationale: YouTube competes directly with user's own YouTube content; GeekNews is 한국
-# 애그리게이터라 이미 다른 소스에서 긁어오는 파생 콘텐츠다.
-NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
+# Rationale: YouTube competes directly with user's own YouTube content; GeekNews는 한국
+# 애그리게이터라 이미 다른 소스에서 긁어오는 파생 콘텐츠다. GitHub Trending은 Phase 2에서
+# anchor → non-anchor로 강등 — GitHub 단독 트렌딩 툴(HN/Reddit 토론 없음)은 "yet another
+# tool" 패턴이므로 키워드 섹터를 단독으로 채우지 못하게 한다. (refs/cross_source_count에는 기여.)
+NON_ANCHOR_SOURCES = {"youtube", "geeknews", "github_trending"}
 
 # anthropic_releases 아이템이 cluster boost나 refs로 "끼어들면 안 되는" 섹터들.
 # 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
@@ -645,9 +647,12 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
     for name, cfg in active_sectors:
         group = grouped.get(name, [])
         if name in KEYWORD_SECTORS:
+            # NON_ANCHOR는 raw source 이름(github_trending) 또는 family(youtube/geeknews)
+            # 어느 쪽으로 지정돼도 매칭되도록 둘 다 검사한다.
             group = [
                 it for it in group
-                if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
+                if it.get("source", "") not in NON_ANCHOR_SOURCES
+                and _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
             ]
         group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
 
