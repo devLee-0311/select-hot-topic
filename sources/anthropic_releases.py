@@ -11,6 +11,9 @@ from bs4 import BeautifulSoup
 BLOG_URL = "https://claude.com/blog"
 NEWS_URL = "https://www.anthropic.com/news"
 TIMEOUT = 10
+# 페이지당 fetch 개수. anthropic_official 섹터는 종류별 3개(per_kind_limit)만 노출하므로
+# 10개씩 가져올 필요가 없다. dedup/파싱 실패 여유분을 둔 5개만 가져온다 (이전 10 → 5).
+FETCH_PER_PAGE = 5
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -126,8 +129,8 @@ def _sort_by_date(items: list[dict]) -> list[dict]:
 
 def fetch_anthropic_releases() -> list[dict]:
     """Anthropic 공식 블로그 + 뉴스에서 최신 글 수집 (날짜 내림차순)."""
-    blog_items = _sort_by_date(_fetch_page(BLOG_URL, "/blog/"))[:10]
-    news_items = _sort_by_date(_fetch_page(NEWS_URL, "/news/"))[:10]
+    blog_items = _sort_by_date(_fetch_page(BLOG_URL, "/blog/"))[:FETCH_PER_PAGE]
+    news_items = _sort_by_date(_fetch_page(NEWS_URL, "/news/"))[:FETCH_PER_PAGE]
 
     combined = blog_items + news_items
     return _enrich_descriptions(combined)
