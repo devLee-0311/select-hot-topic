@@ -14,6 +14,7 @@ import pytest
 from pipeline import (
     CLUSTER_NOISE_HARD_EXCLUDE,
     CROSS_SOURCE_BOOST,
+    DIVERSIFY_SECTORS,
     FRESH_SINGLETON_CAP,
     NON_ANCHOR_SOURCES,
     NON_OFFICIAL_SECTORS,
@@ -27,6 +28,7 @@ from pipeline import (
     assign_sector,
     compute_sector_scores,
     detect_clusters,
+    diversify_enabled,
     normalize_engagement,
     run_sector_pipeline,
 )
@@ -499,7 +501,7 @@ def test_compute_sector_scores_recency_decay_applied():
 
 
 def _synthetic_sector_items() -> list[dict]:
-    """Synthetic items across all sectors (2 anthropic + 4 pillars)."""
+    """Synthetic items across all sectors (2 anthropic + 4 pillars + diversify)."""
     return [
         # anthropic_news (URL-routed)
         {
@@ -549,7 +551,30 @@ def _synthetic_sector_items() -> list[dict]:
             "engagement": 150,
             "description": "",
         },
-        # No match — dropped
+        # ai_news_research (pure research, no tool keyword)
+        {
+            "title": "DeepMind publishes new scaling-law paper benchmark",
+            "source": "reddit_machinelearning",
+            "url": "https://reddit.com/r/machinelearning/scaling-law",
+            "engagement": 90,
+            "description": "scaling law foundation model research",
+        },
+        # trending_catch_all pair (no keyword match, 2 source families, shared URL)
+        {
+            "title": "Mystery viral AI demo takes over the internet",
+            "source": "hacker_news",
+            "url": "https://example.com/viral-ai-demo",
+            "engagement": 400,
+            "description": "viral demo no keyword",
+        },
+        {
+            "title": "Mystery viral AI demo takes over the internet",
+            "source": "reddit_technology",
+            "url": "https://example.com/viral-ai-demo",
+            "engagement": 350,
+            "description": "viral demo no keyword",
+        },
+        # No match, single source — dropped
         {
             "title": "Weekend hiking report",
             "source": "reddit_hiking",
@@ -560,14 +585,14 @@ def _synthetic_sector_items() -> list[dict]:
     ]
 
 
-def test_run_sector_pipeline_returns_all_6_sectors():
-    """run_sector_pipeline returns all 6 sectors (2 anthropic + 4 pillar)."""
+def test_run_sector_pipeline_returns_8_sectors():
+    """run_sector_pipeline returns all 8 sectors (2 anthropic + 4 pillar + 2 diversify)."""
     items = _synthetic_sector_items()
     result = run_sector_pipeline(items)
     assert "sectors" in result
     expected = {name for name, _ in SECTORS}
     assert set(result["sectors"].keys()) == expected
-    assert len(expected) == 6
+    assert len(expected) == 8
 
 
 def test_run_sector_pipeline_return_keys():
@@ -984,6 +1009,28 @@ def _fake_sector_result() -> dict:
                 },
             ],
             "ai_infra": [],
+            "ai_news_research": [
+                {
+                    "title": "New scaling-law paper",
+                    "url": "https://reddit.com/r/ml/scaling",
+                    "source": "reddit_machinelearning",
+                    "final_score": 2.0,
+                    "cross_source_count": 1,
+                    "description": "scaling law research",
+                    "cluster_refs": [],
+                },
+            ],
+            "trending_catch_all": [
+                {
+                    "title": "Viral AI demo",
+                    "url": "https://example.com/viral",
+                    "source": "hacker_news",
+                    "final_score": 3.0,
+                    "cross_source_count": 2,
+                    "description": "viral demo",
+                    "cluster_refs": [],
+                },
+            ],
         },
     }
 
@@ -1221,3 +1268,630 @@ def test_auto_save_persists_all_markdown_urls_without_prompt(tmp_path, monkeypat
             saved_urls.add(u)
     for item in fake_items:
         assert item["url"] in saved_urls, f"{item['url']} not auto-saved"
+
+
+# ===========================================================================
+# Phase 1: ai_news_research routing (after-tools order, A1 tradeoff)
+# ===========================================================================
+
+
+def test_assign_sector_ai_news_research_keyword():
+    """Research keyword (no tool keyword) routes to ai_news_research."""
+    item = {
+        "title": "New benchmark released for foundation models",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/benchmark",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_news_research"
+
+
+def test_pure_research_routes_to_ai_news_research():
+    """Pure research item (no tool keyword) routes to ai_news_research."""
+    item = {
+        "title": "Google DeepMind publishes new scaling-law paper",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/scaling-law",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_news_research"
+
+
+def test_ai_regulation_routes_to_ai_news_research():
+    """Policy/news item (no tool keyword) routes to ai_news_research."""
+    item = {
+        "title": "EU passes comprehensive AI regulation act",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/eu-ai-act",
+        "description": "",
+    }
+    assert assign_sector(item) == "ai_news_research"
+
+
+def test_mixed_tool_research_item_stays_in_tool_sector():
+    """Mixed tool+research items route to their tool sector (A1 zero-leakage tradeoff)."""
+    # "openai" matches ai_infra first → not ai_news_research
+    openai_item = {
+        "title": "OpenAI announces GPT-5 with breakthrough reasoning paper",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/gpt5-paper",
+        "description": "",
+    }
+    assert assign_sector(openai_item) == "ai_infra"
+
+    # "langgraph" matches agents first → no leakage into ai_news_research
+    langgraph_item = {
+        "title": "LangGraph adds chain of thought reasoning",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/langgraph-cot",
+        "description": "",
+    }
+    assert assign_sector(langgraph_item) == "agents"
+
+
+def test_assign_sector_deny_prevents_tool_leak():
+    """Deny list on ai_news_research blocks tool terms (defensive belt-and-suspenders).
+
+    A title that ONLY matches a research keyword plus a denied tool term must not
+    land in ai_news_research. 'cursor' is in the deny list; here the research term
+    'multimodal' would match include, but 'cursor' triggers deny.
+
+    Note: 'cursor' also matches ai_infra (which is checked first), so this item
+    routes to ai_infra. The deny is a safety net if ordering ever changed.
+    """
+    item = {
+        "title": "Cursor multimodal preview",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/cursor-multimodal",
+        "description": "",
+    }
+    # ai_infra wins by order; critically NOT ai_news_research.
+    assert assign_sector(item) == "ai_infra"
+    assert assign_sector(item) != "ai_news_research"
+
+
+def test_assign_sector_trending_catch_all_never_keyword_routed():
+    """assign_sector never returns trending_catch_all even though it is in KEYWORD_SECTORS."""
+    # An item with no keyword match → None (not catch-all; that's step 3b's job)
+    item = {
+        "title": "Completely unrelated cooking recipe",
+        "source": "reddit_food",
+        "url": "https://reddit.com/food",
+        "description": "",
+    }
+    assert assign_sector(item) is None
+    # Even a research-flavored item never returns trending_catch_all from assign_sector
+    research = {
+        "title": "New benchmark paper",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/b",
+        "description": "",
+    }
+    assert assign_sector(research) != "trending_catch_all"
+
+
+# ===========================================================================
+# Phase 1: trending_catch_all post-clustering routing (step 3b)
+# ===========================================================================
+
+
+def test_catch_all_captures_unrouted_corroborated_item():
+    """Item matching no keyword sector with cross_source_count=2 lands in trending_catch_all."""
+    items = [
+        {
+            "title": "Mystery viral demo sweeps the web",
+            "source": "hacker_news",
+            "url": "https://example.com/viral-x",
+            "engagement": 400,
+            "description": "no keyword here",
+        },
+        {
+            "title": "Mystery viral demo sweeps the web",
+            "source": "reddit_technology",
+            "url": "https://example.com/viral-x",
+            "engagement": 350,
+            "description": "no keyword here",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    # Both items corroborate each other (shared URL, 2 families) → catch-all.
+    catch_all = result["sectors"]["trending_catch_all"]
+    assert len(catch_all) >= 1
+    for it in catch_all:
+        assert it["sector"] == "trending_catch_all"
+        assert it["cross_source_count"] >= 2
+
+
+def test_catch_all_single_source_stays_dropped():
+    """Item matching no keyword sector with cross_source_count=1 stays None (dropped)."""
+    items = [
+        {
+            "title": "Lonely uncorroborated curiosity",
+            "source": "hacker_news",
+            "url": "https://example.com/lonely",
+            "engagement": 400,
+            "description": "no keyword",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    assert result["sectors"]["trending_catch_all"] == []
+    # The item itself stays unrouted.
+    lonely = next(i for i in result["all_scored"] if i["title"].startswith("Lonely"))
+    assert lonely["sector"] is None
+
+
+def test_catch_all_keyword_item_not_captured():
+    """An item that DOES match a keyword sector never falls into catch-all even if corroborated."""
+    items = [
+        {
+            "title": "Claude Code new feature",
+            "source": "hacker_news",
+            "url": "https://example.com/cc-feat",
+            "engagement": 400,
+            "description": "claude code",
+        },
+        {
+            "title": "Claude Code new feature",
+            "source": "reddit_programming",
+            "url": "https://example.com/cc-feat",
+            "engagement": 350,
+            "description": "claude code",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    # Routed to claude_code, not catch-all.
+    assert result["sectors"]["trending_catch_all"] == []
+    assert len(result["sectors"]["claude_code"]) >= 1
+
+
+# ===========================================================================
+# Phase 1: research item with real engagement gets a slot
+# ===========================================================================
+
+
+def test_research_item_from_machinelearning_gets_slot():
+    """A low-engagement r/MachineLearning research item appears in ai_news_research."""
+    items = [
+        {
+            "title": "New paper on mixture of experts scaling",
+            "source": "reddit_machinelearning",
+            "url": "https://reddit.com/r/machinelearning/moe-paper",
+            "engagement": 15,  # low but real
+            "description": "mixture of experts scaling law",
+        },
+    ]
+    result = run_sector_pipeline(items)
+    research = result["sectors"]["ai_news_research"]
+    assert len(research) == 1
+    item = research[0]
+    assert item["source"] == "reddit_machinelearning"
+    # Real engagement → final_score > 0 (singleton normalized to 1.0 * boost 1.0 * recency)
+    assert item["final_score"] > 0
+
+
+def test_mixed_pipeline_produces_both_tool_and_research():
+    """Full mixed pipeline yields output in BOTH a tool sector AND ai_news_research."""
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
+    assert len(result["sectors"]["claude_code"]) >= 1
+    assert len(result["sectors"]["ai_news_research"]) >= 1
+
+
+# ===========================================================================
+# Phase 1: sectors_full exposure + cluster_refs before slice (N1)
+# ===========================================================================
+
+
+def test_run_sector_pipeline_returns_sectors_full():
+    """Result includes sectors_full (unsliced per-sector candidate pool)."""
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
+    assert "sectors_full" in result
+    assert set(result["sectors_full"].keys()) == {name for name, _ in SECTORS}
+
+
+def test_sectors_full_superset_of_sliced():
+    """sectors_full[name] contains at least as many items as the sliced sectors[name]."""
+    # 6 claude_code items but count caps display at 5 → full has 6, sliced has 5.
+    items = [
+        {
+            "title": f"Claude Code article {i}",
+            "source": "hacker_news",
+            "url": f"https://hn.example.com/claude-code-{i}",
+            "engagement": 100 + i,
+            "description": "",
+        }
+        for i in range(6)
+    ]
+    result = run_sector_pipeline(items)
+    assert len(result["sectors_full"]["claude_code"]) == 6
+    assert len(result["sectors"]["claude_code"]) == 5
+
+
+def test_cluster_refs_attached_before_slice():
+    """cluster_refs are attached to items beyond the count slice (N1 fix).
+
+    Build a clustered claude_code topic ranked beyond the slice and confirm it
+    carries cluster_refs in sectors_full.
+    """
+    items = []
+    # 5 high-engagement singletons to fill the top-5 slice.
+    for i in range(5):
+        items.append({
+            "title": f"Claude Code distinct topic {i}",
+            "source": "hacker_news",
+            "url": f"https://hn.example.com/cc-distinct-{i}",
+            "engagement": 1000 + i,
+            "description": "",
+        })
+    # A clustered (2-source) claude_code item with LOW engagement → ranked beyond slice.
+    items.append({
+        "title": "Claude Code niche corroborated thing",
+        "source": "hacker_news",
+        "url": "https://example.com/cc-niche",
+        "engagement": 5,
+        "description": "claude code niche",
+    })
+    items.append({
+        "title": "Claude Code niche corroborated thing",
+        "source": "reddit_programming",
+        "url": "https://example.com/cc-niche",
+        "engagement": 3,
+        "description": "claude code niche",
+    })
+    result = run_sector_pipeline(items)
+    full = result["sectors_full"]["claude_code"]
+    niche = next(it for it in full if "niche" in it["title"])
+    # The niche item is beyond the top-5 slice but still carries cluster_refs.
+    assert niche["cross_source_count"] >= 2
+    assert "cluster_refs" in niche
+    assert len(niche["cluster_refs"]) >= 1
+
+
+# ===========================================================================
+# Phase 1: rollback (DISABLE_DIVERSIFY_SECTORS)
+# ===========================================================================
+
+
+def test_diversify_enabled_default_true(monkeypatch):
+    """diversify_enabled() returns True when env var is unset."""
+    monkeypatch.delenv("DISABLE_DIVERSIFY_SECTORS", raising=False)
+    assert diversify_enabled() is True
+
+
+def test_diversify_enabled_false_when_disabled(monkeypatch):
+    """diversify_enabled() returns False when DISABLE_DIVERSIFY_SECTORS=1."""
+    monkeypatch.setenv("DISABLE_DIVERSIFY_SECTORS", "1")
+    assert diversify_enabled() is False
+
+
+def test_rollback_env_var_reverts_to_6_sectors(monkeypatch, tmp_path, capsys):
+    """DISABLE_DIVERSIFY_SECTORS=1 → pipeline yields 6 sectors AND main.py floor is inert.
+
+    Verifies the cross-module gate: both run_sector_pipeline (6 keys, no catch-all)
+    AND the main.py diversity-floor block must be disabled by the same env var.
+    """
+    monkeypatch.setenv("DISABLE_DIVERSIFY_SECTORS", "1")
+
+    # --- Part 1: pipeline yields 6 sectors, no diversify sectors, catch-all skipped ---
+    items = _synthetic_sector_items()
+    result = run_sector_pipeline(items)
+    assert result["diversify_enabled"] is False
+    assert set(result["sectors"].keys()) == {
+        "anthropic_news", "anthropic_blog",
+        "claude_code", "agents", "local_llm", "ai_infra",
+    }
+    assert len(result["sectors"]) == 6
+    for diversify_name in DIVERSIFY_SECTORS:
+        assert diversify_name not in result["sectors"]
+    # The corroborated unrouted pair must NOT be captured (catch-all disabled).
+    for it in result["all_scored"]:
+        assert it.get("sector") != "trending_catch_all"
+
+    # --- Part 2: main.py floor block is inert under the env var ---
+    import builtins
+    import sys as sys_mod
+
+    import history as history_mod
+    import main as main_mod
+    import rolling_stats as rs
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+    stats_path = tmp_path / "score_stats.json"
+    orig_load = rs.load_rolling_stats
+    orig_save = rs.save_rolling_stats
+    monkeypatch.setattr(
+        rs, "load_rolling_stats", lambda path=None: orig_load(path=str(stats_path))
+    )
+    monkeypatch.setattr(
+        rs, "save_rolling_stats",
+        lambda samples, today_max, path=None, keep_days=7:
+            orig_save(samples, today_max, path=str(stats_path), keep_days=keep_days),
+    )
+
+    fake_items = [
+        {
+            "title": "Claude Code article",
+            "source": "hacker_news",
+            "url": "https://hn.example.com/cc-rollback",
+            "engagement": 120,
+            "description": "",
+        },
+    ]
+    monkeypatch.setattr(main_mod, "collect_all", lambda *a, **k: list(fake_items))
+
+    def _fail_input(*a, **k):
+        raise AssertionError("input() must not be called in auto-save mode")
+
+    monkeypatch.setattr(builtins, "input", _fail_input)
+    from rich.console import Console as _RichConsole
+    monkeypatch.setattr(_RichConsole, "input", lambda self, *a, **k: _fail_input())
+    monkeypatch.setattr(sys_mod, "argv", [
+        "main.py", "--mode", "sector", "--format", "markdown", "--auto-save",
+    ])
+
+    try:
+        main_mod.cli()
+    except SystemExit:
+        pass
+
+    out = capsys.readouterr().out
+    # Output should have exactly 6 sector chunks (delimiter count = 5).
+    assert out.count("@@@SECTOR_BREAK@@@") == 5
+    # Diversify sector labels must not appear.
+    assert "AI 뉴스 & 연구" not in out
+    assert "AI 트렌딩" not in out
+
+
+# ===========================================================================
+# Phase 1: diversity floor (main.py) — backfill fresh / no resurface
+# ===========================================================================
+
+
+def _run_cli_markdown(monkeypatch, tmp_path, capsys, fake_items, seed_history_urls=None):
+    """Drive main.cli() in markdown auto-save mode with mocked sources + isolated history.
+
+    Returns the captured stdout (markdown output).
+    """
+    import builtins
+    import sys as sys_mod
+
+    import history as history_mod
+    import main as main_mod
+    import rolling_stats as rs
+
+    hist_path = tmp_path / "history.json"
+    monkeypatch.setattr(history_mod, "HISTORY_FILE", str(hist_path))
+
+    # Seed history with already-shown URLs (mark them "seen").
+    if seed_history_urls:
+        import json as _json
+        from datetime import datetime as _dt
+        entries = [
+            {
+                "topic": f"seed {i}",
+                "score": 0,
+                "reasons": [],
+                "references": [u],
+                "mode": "sector",
+                "saved_at": _dt.now().isoformat(),
+            }
+            for i, u in enumerate(seed_history_urls)
+        ]
+        with open(hist_path, "w", encoding="utf-8") as f:
+            _json.dump(entries, f)
+
+    stats_path = tmp_path / "score_stats.json"
+    orig_load = rs.load_rolling_stats
+    orig_save = rs.save_rolling_stats
+    monkeypatch.setattr(
+        rs, "load_rolling_stats", lambda path=None: orig_load(path=str(stats_path))
+    )
+    monkeypatch.setattr(
+        rs, "save_rolling_stats",
+        lambda samples, today_max, path=None, keep_days=7:
+            orig_save(samples, today_max, path=str(stats_path), keep_days=keep_days),
+    )
+
+    monkeypatch.setattr(main_mod, "collect_all", lambda *a, **k: list(fake_items))
+
+    def _fail_input(*a, **k):
+        raise AssertionError("input() must not be called in auto-save mode")
+
+    monkeypatch.setattr(builtins, "input", _fail_input)
+    from rich.console import Console as _RichConsole
+    monkeypatch.setattr(_RichConsole, "input", lambda self, *a, **k: _fail_input())
+    monkeypatch.setattr(sys_mod, "argv", [
+        "main.py", "--mode", "sector", "--format", "markdown", "--auto-save",
+    ])
+
+    try:
+        main_mod.cli()
+    except SystemExit:
+        pass
+
+    return capsys.readouterr().out
+
+
+def _floor_keepalive_item():
+    """A fresh claude_code anchor item that always survives filter_seen.
+
+    Keeps the global `wrapped` list non-empty so main.cli() does NOT take the
+    early "새로운 추천 토픽이 없습니다." return before the floor block runs.
+    """
+    return {
+        "title": "Keepalive Claude Code tip",
+        "source": "hacker_news",
+        "url": "https://hn.example.com/keepalive-cc",
+        "engagement": 500,
+        "description": "claude code",
+    }
+
+
+def _research_items_4_seen_1_fresh():
+    """4 high-score SEEN research items + 1 low-score FRESH research item (all reddit_ML).
+
+    All 5 share the reddit family so engagement normalization gives distinct ranks;
+    the fresh item (lowest engagement) ranks 5th, beyond the count=4 slice.
+
+    Titles/descriptions are deliberately distinct (different research keywords) so the
+    items do NOT cluster together — this keeps the floor test focused on primary-entry
+    backfill behavior rather than incidental cluster_refs.
+    """
+    seen_specs = [
+        ("Distillation tradeoffs in compact transformers", "distillation"),
+        ("Reward model calibration under rlhf drift", "rlhf"),
+        ("Long context retrieval for retrieval systems", "long context"),
+        ("Mixture of experts routing stability study", "mixture of experts"),
+    ]
+    seen = [
+        {
+            "title": title,
+            "source": "reddit_machinelearning",
+            "url": f"https://reddit.com/r/ml/seen-{i}",
+            "engagement": 200 - i * 10,  # 200,190,180,170 → top-4 by rank
+            "description": kw,
+        }
+        for i, (title, kw) in enumerate(seen_specs)
+    ]
+    fresh = {
+        "title": "Fresh unseen scaling law preprint",
+        "source": "reddit_machinelearning",
+        "url": "https://reddit.com/r/ml/fresh-unseen",
+        "engagement": 5,  # lowest → ranked 5th, beyond count=4 slice
+        "description": "scaling law preprint",
+    }
+    return seen, fresh
+
+
+def test_floor_backfills_fresh_item_after_filter_seen(monkeypatch, tmp_path, capsys):
+    """When sliced ai_news_research items are all seen but sectors_full has an unseen
+    candidate, the floor restores >= 1 FRESH item that is not in history."""
+    monkeypatch.delenv("DISABLE_DIVERSIFY_SECTORS", raising=False)
+    seen, fresh = _research_items_4_seen_1_fresh()
+    keepalive = _floor_keepalive_item()
+    fake_items = seen + [fresh, keepalive]
+    # Only the seen research items are in history (keepalive + fresh stay unseen).
+    seen_urls = [s["url"] for s in seen]
+
+    out = _run_cli_markdown(
+        monkeypatch, tmp_path, capsys, fake_items, seed_history_urls=seen_urls
+    )
+    # The fresh (unseen) item should be backfilled into the ai_news_research chunk.
+    assert "Fresh unseen scaling law preprint" in out
+    # None of the seen items should resurface as a primary entry.
+    for s in seen:
+        assert s["title"] not in out
+
+
+def test_floor_does_not_resurface_seen_items(monkeypatch, tmp_path, capsys):
+    """When EVERY candidate (sliced + unsliced) is seen, ai_news_research stays empty —
+    no stale repeat (A2)."""
+    monkeypatch.delenv("DISABLE_DIVERSIFY_SECTORS", raising=False)
+    seen, fresh = _research_items_4_seen_1_fresh()
+    keepalive = _floor_keepalive_item()
+    fake_items = seen + [fresh, keepalive]
+    # Seed ALL research urls (including the would-be-fresh one) as seen.
+    # keepalive stays unseen so the pipeline still produces output.
+    all_urls = [s["url"] for s in seen] + [fresh["url"]]
+
+    out = _run_cli_markdown(
+        monkeypatch, tmp_path, capsys, fake_items, seed_history_urls=all_urls
+    )
+    # No research item resurfaces.
+    for s in seen:
+        assert s["title"] not in out
+    assert "Fresh unseen scaling law preprint" not in out
+    # The ai_news_research chunk shows the empty placeholder.
+    # Match by the sector emoji (🔬) since the label '&' is HTML-escaped to '&amp;'.
+    chunks = out.split("@@@SECTOR_BREAK@@@")
+    research_chunk = next(c for c in chunks if "🔬" in c)
+    assert "(없음)" in research_chunk
+
+
+# ===========================================================================
+# Phase 1: observability logging
+# ===========================================================================
+
+
+def test_sector_item_counts_logged(caplog):
+    """run_sector_pipeline emits a per-run sector_item_counts log line."""
+    import logging
+    items = _synthetic_sector_items()
+    with caplog.at_level(logging.INFO, logger="pipeline"):
+        run_sector_pipeline(items)
+    assert any("sector_item_counts" in rec.message for rec in caplog.records)
+
+
+# ===========================================================================
+# Phase 1: format_sector_html handles 8 sectors
+# ===========================================================================
+
+
+def test_format_sector_html_8_chunks():
+    """format_sector_html returns exactly 8 chunks (one per sector)."""
+    from main import format_sector_html
+
+    chunks = format_sector_html(_fake_sector_result(), "섹터별 핫토픽", max_score=6.0)
+    assert len(chunks) == 8
+    assert len(chunks) == len(SECTORS)
+
+
+# ===========================================================================
+# Phase 1: r/MachineLearning fetcher shape (mocked HTTP)
+# ===========================================================================
+
+
+def test_reddit_machinelearning_fetcher_shape(monkeypatch):
+    """fetch_reddit_machinelearning returns dicts with source=reddit_machinelearning, engagement>0."""
+    import sources.reddit_subs as reddit_subs
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "children": [
+                        {
+                            "data": {
+                                "title": "New SOTA on ImageNet",
+                                "selftext": "We present a new model...",
+                                "permalink": "/r/MachineLearning/comments/abc/new_sota/",
+                                "score": 120,
+                                "num_comments": 45,
+                                "created_utc": 1_700_000_000,
+                                "stickied": False,
+                            }
+                        },
+                        {
+                            "data": {
+                                "title": "Stickied megathread",
+                                "selftext": "",
+                                "permalink": "/r/MachineLearning/comments/xyz/megathread/",
+                                "score": 9999,
+                                "num_comments": 9999,
+                                "created_utc": 1_700_000_000,
+                                "stickied": True,
+                            }
+                        },
+                    ]
+                }
+            }
+
+    def _fake_get(url, **kwargs):
+        assert "MachineLearning" in url
+        return _FakeResp()
+
+    monkeypatch.setattr(reddit_subs.requests, "get", _fake_get)
+
+    results = reddit_subs.fetch_reddit_machinelearning()
+    assert len(results) == 1  # stickied filtered out
+    item = results[0]
+    assert item["source"] == "reddit_machinelearning"
+    assert item["engagement"] == 165  # 120 + 45
+    assert item["engagement"] > 0
+    assert item["url"].startswith("https://reddit.com/")
+    assert item["title"] == "New SOTA on ImageNet"

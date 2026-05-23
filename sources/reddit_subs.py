@@ -63,3 +63,8 @@ def fetch_reddit_openai() -> list[dict]:
 def fetch_reddit_programming() -> list[dict]:
     """Reddit r/programming 핫글 수집."""
     return _fetch_subreddit("programming")
+
+
+def fetch_reddit_machinelearning() -> list[dict]:
+    """Reddit r/MachineLearning 핫글 수집 (AI 연구 토론 소스)."""
+    return _fetch_subreddit("MachineLearning")

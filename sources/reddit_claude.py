@@ -1,6 +1,8 @@
 """Reddit r/ClaudeAI 핫글 수집. PRAW(API 키) 또는 JSON 엔드포인트 사용."""
 
 import os
+import sys
+
 import requests
 
 TIMEOUT = 10

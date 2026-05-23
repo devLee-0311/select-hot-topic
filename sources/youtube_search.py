@@ -3,7 +3,6 @@
 import sys
 
 import requests
-from bs4 import BeautifulSoup
 
 SEARCH_URL = "https://www.youtube.com/results"
 QUERIES = [

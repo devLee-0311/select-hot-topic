@@ -9,6 +9,7 @@ from sources import (
     fetch_hacker_news,
     fetch_reddit_claude,
     fetch_reddit_localllama,
+    fetch_reddit_machinelearning,
     fetch_reddit_openai,
     fetch_reddit_programming,
     fetch_youtube_search,
@@ -34,13 +35,14 @@ SECTOR_CONFIG = ModeConfig(
     label="섹터별 핫토픽",
     banner_text=(
         "[bold]섹터별 핫토픽 파인더[/]\n"
-        "5개 섹터 × 5개 = 25개 주제 (Claude / Codex / 로컬LLM / 공식뉴스 / 공식블로그)"
+        "8개 섹터 (Claude Code / 에이전트 / 로컬LLM / AI인프라 / AI뉴스연구 / 트렌딩 / 공식뉴스 / 공식블로그)"
     ),
     fetchers={
         "Anthropic Releases": fetch_anthropic_releases,
         "GitHub Trending": fetch_github_trending,
         "Reddit r/ClaudeAI": fetch_reddit_claude,
         "Reddit r/LocalLLaMA": fetch_reddit_localllama,
+        "Reddit r/MachineLearning": fetch_reddit_machinelearning,
         "Reddit r/OpenAI": fetch_reddit_openai,
         "Reddit r/programming": fetch_reddit_programming,
         "Hacker News": fetch_hacker_news,

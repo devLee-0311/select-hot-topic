@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import time
 from collections import defaultdict
 from datetime import datetime
 
 from utils import clean_for_compare, similarity
+
+logger = logging.getLogger(__name__)
+
+
+def diversify_enabled() -> bool:
+    """다양화 섹터(ai_news_research / trending_catch_all) + 다양성 floor 활성화 여부.
+
+    DISABLE_DIVERSIFY_SECTORS=1 이면 False를 반환하여 v1 동작(6개 섹터,
+    catch-all 없음, floor 없음)으로 롤백한다. pipeline.py와 main.py가 동일한
+    스위치를 읽도록 공유 헬퍼로 정의한다.
+    """
+    return os.environ.get("DISABLE_DIVERSIFY_SECTORS") != "1"
+
+
+# 롤백 시 제외되는 다양화 전용 섹터.
+DIVERSIFY_SECTORS = {"ai_news_research", "trending_catch_all"}
 
 # ── 섹터 정의 ────────────────────────────────────────────────
 # 순서가 중요: 첫 매칭 섹터가 승리. 각 섹터는 5개 슬롯씩 배정.
@@ -94,12 +112,60 @@ SECTORS: list[tuple[str, dict]] = [
             "count": 5,
         },
     ),
+    (
+        # 4개 tool 섹터 뒤에 위치 — tool 키워드 우선 매칭 후 남은
+        # 순수 연구/뉴스 아이템만 여기로 떨어진다 (zero tool-item leakage).
+        "ai_news_research",
+        {
+            "label": "AI 뉴스 & 연구",
+            "emoji": "🔬",
+            "include": [
+                # Research signals
+                "paper", "arxiv", "benchmark", "sota", "state of the art",
+                "preprint", "fine-tuning", "fine tuning", "finetuning",
+                "multimodal", "vision language",
+                "reasoning model", "chain of thought", "reward model",
+                "rlhf", "dpo", "grpo", "constitutional ai",
+                "scaling law", "context window", "long context",
+                "moe", "mixture of experts", "distillation",
+                "open source model", "open weight", "foundation model",
+                "논문", "연구", "벤치마크", "멀티모달",
+                # News/industry signals
+                "ai regulation", "ai policy", "ai safety", "ai ethics",
+                "ai startup", "ai funding", "ai acquisition",
+                "ai legislation", "ai governance",
+                "ai copyright", "ai lawsuit", "ai ban", "ai risk",
+                "superintelligence", "agi", "alignment",
+                "ai 규제", "ai 정책", "ai 안전",
+            ],
+            "deny": ["claude code", "cursor", "copilot", "ollama", "lm studio"],
+            "count": 4,
+        },
+    ),
+    (
+        # 키워드 섹터에 매칭되지 않았지만 cross_source_count >= 2로 검증된
+        # 고신호 트렌딩 아이템 수집. assign_sector()는 이 섹터를 라우팅하지 않으며
+        # step 3b(post-clustering)에서만 채워진다.
+        "trending_catch_all",
+        {
+            "label": "AI 트렌딩",
+            "emoji": "📈",
+            "include": [],
+            "deny": [],
+            "count": 2,
+        },
+    ),
 ]
 
 SECTORS_BY_KEY: dict[str, dict] = {name: cfg for name, cfg in SECTORS}
 
 # 키워드 기반 섹터 (URL 라우팅이 아닌 섹터) — non-anchor 제외 대상.
-KEYWORD_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+# trending_catch_all은 NON_ANCHOR 필터 적용을 위해 포함되지만, assign_sector()는
+# 명시적 guard로 절대 라우팅하지 않는다 (step 3b에서만 채워짐).
+KEYWORD_SECTORS = {
+    "claude_code", "agents", "local_llm", "ai_infra",
+    "ai_news_research", "trending_catch_all",
+}
 
 # 클러스터 노이즈에서 강제로 제외되는 단어 — generic하지만 섹터 구분에 필수.
 # 이 단어들이 SECTOR_CLUSTER_NOISE에 포함되면 클러스터링 신호가 너무 얕아진다.
@@ -126,7 +192,9 @@ NON_ANCHOR_SOURCES = {"youtube", "geeknews"}
 # 이유: anthropic_releases는 anthropic_news/anthropic_blog 전용 섹터를 따로 갖는다.
 # claude/codex/local_llm 섹터에서 anthropic_releases가 끼면 (a) 같은 공식 글이
 # 두 번 노출되는 시각적 중복, (b) cross-source 부스트로 점수가 과도하게 부풀려진다.
-NON_OFFICIAL_SECTORS = {"claude_code", "agents", "local_llm", "ai_infra"}
+NON_OFFICIAL_SECTORS = {
+    "claude_code", "agents", "local_llm", "ai_infra", "ai_news_research",
+}
 ANTHROPIC_SOURCE_FAMILY = "anthropic"  # _source_family("anthropic_releases")
 
 CROSS_SOURCE_BOOST = {1: 1.0, 2: 1.5, 3: 2.5}
@@ -214,6 +282,11 @@ def assign_sector(item: dict) -> str | None:
     text = _searchable_text(item)
     for name, cfg in SECTORS:
         if name not in KEYWORD_SECTORS:
+            continue
+        # trending_catch_all은 키워드 라우팅 대상이 아니다. step 3b(post-clustering)에서만
+        # 채워지므로 명시적으로 건너뛴다. (KEYWORD_SECTORS에 있는 이유는 NON_ANCHOR 필터
+        # 적용을 위해서일 뿐 — include 키워드가 추가되거나 any→all로 바뀌어도 안전하도록 guard.)
+        if name == "trending_catch_all":
             continue
         include = cfg.get("include", [])
         deny = cfg.get("deny", [])
@@ -483,6 +556,7 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
     1. detect_clusters
     2. normalize_engagement
     3. assign_sector (각 아이템)
+    3b. trending_catch_all 라우팅 (sector is None AND cross_source_count >= 2)
     4. 섹터별 클러스터 효과 재조정 — anthropic_releases는 non-official 섹터에서 제외
     5. compute_sector_scores (재조정된 boost 반영)
     6. 섹터별 그룹핑 — 키워드 섹터는 NON_ANCHOR_SOURCES 제외, 점수 내림차순 정렬, count 슬롯으로 자름
@@ -491,11 +565,22 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
 
     config 옵션:
       sector_counts: dict[str, int] — 섹터별 기본 5 슬롯 오버라이드
+
+    반환 dict에는 다음이 포함된다:
+      sectors: count-sliced 섹터별 아이템 (디스플레이용)
+      sectors_full: count-slice 이전의 전체(NON_ANCHOR 필터+정렬) 후보 리스트 — 다양성 floor용
+      diversify_enabled: DISABLE_DIVERSIFY_SECTORS 롤백 스위치 상태
     """
     if config is None:
         config = {}
 
     sector_counts_override = config.get("sector_counts", {}) or {}
+    enabled = diversify_enabled()
+    # 롤백 시 다양화 전용 섹터를 출력 루프에서 제외 (6개 섹터로 복귀).
+    active_sectors: list[tuple[str, dict]] = [
+        (name, cfg) for name, cfg in SECTORS
+        if enabled or name not in DIVERSIFY_SECTORS
+    ]
 
     # 1. 클러스터링
     items, clusters = detect_clusters(items)
@@ -504,6 +589,13 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
     # 3. 섹터 할당 (스코어링 전에 먼저 — per-sector 클러스터 재조정을 위해)
     for item in items:
         item["sector"] = assign_sector(item)
+
+    # 3b. catch-all: 키워드 섹터에 매칭되지 않았지만(sector is None) cross_source_count >= 2로
+    #     검증된 고신호 트렌딩 아이템을 trending_catch_all로 라우팅. 롤백 시 건너뜀.
+    if enabled:
+        for item in items:
+            if item.get("sector") is None and item.get("cross_source_count", 1) >= 2:
+                item["sector"] = "trending_catch_all"
 
     # 4. 섹터별 클러스터 효과 재조정
     #    anthropic_releases 아이템은 NON_OFFICIAL_SECTORS 소속 아이템의 교차 소스 카운트와
@@ -539,7 +631,10 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
     items = compute_sector_scores(items)
 
     # 6. 섹터별 그룹핑 / 필터링 / 정렬 / 자르기
-    sectors_out: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
+    #    sectors_full: count-slice 이전의 전체 후보 (다양성 floor가 신선한 아이템을 backfill).
+    #    sectors_out: 디스플레이용으로 count 슬롯까지 자른 결과.
+    sectors_out: dict[str, list[dict]] = {name: [] for name, _ in active_sectors}
+    sectors_full: dict[str, list[dict]] = {name: [] for name, _ in active_sectors}
     grouped: dict[str, list[dict]] = defaultdict(list)
     for item in items:
         sec = item.get("sector")
@@ -547,7 +642,7 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
             continue
         grouped[sec].append(item)
 
-    for name, cfg in SECTORS:
+    for name, cfg in active_sectors:
         group = grouped.get(name, [])
         if name in KEYWORD_SECTORS:
             group = [
@@ -555,12 +650,10 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
                 if _source_family(it.get("source", "")) not in NON_ANCHOR_SOURCES
             ]
         group.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-        count = sector_counts_override.get(name, cfg.get("count", 5))
-        sectors_out[name] = group[:count]
 
-    # 7. cluster_refs 부착
-    for name, sector_items in sectors_out.items():
-        for it in sector_items:
+        # 7. cluster_refs 부착 — slice 이전 group 전체에 부착하여 floor-backfill된
+        #    아이템도 related-source 링크를 갖도록 한다 (N1 fix).
+        for it in group:
             cid = it.get("cluster_id")
             if cid is not None and len(cluster_map[cid]) >= 2:
                 # NON_ANCHOR_SOURCES(youtube/geeknews)는 anchor는 못 되지만 refs에는
@@ -586,6 +679,10 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
             else:
                 it["cluster_refs"] = []
 
+        sectors_full[name] = group
+        count = sector_counts_override.get(name, cfg.get("count", 5))
+        sectors_out[name] = group[:count]
+
     # 8. max_score 계산 (디스플레이 정규화 앵커)
     #    ranking은 여전히 item["final_score"] 기준. 이 값은 표시용 normalization 앵커로만 사용.
     today_max = max((i.get("final_score", 0.0) for i in items), default=1.0) or 1.0
@@ -598,11 +695,21 @@ def run_sector_pipeline(items: list[dict], config: dict | None = None) -> dict:
     except Exception:
         max_score = today_max
 
+    # 관측성: 섹터별 아이템 수를 로그로 남겨 다양화 동작 여부를 모니터링.
+    sector_counts = {name: len(its) for name, its in sectors_out.items()}
+    logger.info(
+        "sector_item_counts=%s total=%d",
+        sector_counts,
+        sum(sector_counts.values()),
+    )
+
     return {
         "sectors": sectors_out,
+        "sectors_full": sectors_full,
         "all_scored": items,
         "clusters": clusters,
         "max_score": max_score,
+        "diversify_enabled": enabled,
     }
 
 

@@ -2,6 +2,7 @@ from .github_trending import fetch_github_trending
 from .reddit_claude import fetch_reddit_claude
 from .reddit_subs import (
     fetch_reddit_localllama,
+    fetch_reddit_machinelearning,
     fetch_reddit_openai,
     fetch_reddit_programming,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "fetch_github_trending",
     "fetch_reddit_claude",
     "fetch_reddit_localllama",
+    "fetch_reddit_machinelearning",
     "fetch_reddit_openai",
     "fetch_reddit_programming",
     "fetch_hacker_news",

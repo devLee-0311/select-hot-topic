@@ -18,6 +18,7 @@ from modes import MODES, SECTOR_CONFIG
 from pipeline import (
     DISPLAY_SCORE_CAP_BY_CROSS,
     FRESH_SINGLETON_CAP,
+    KEYWORD_SECTORS,
     SECTORS,
     SECTORS_BY_KEY,
     adapt_for_filter_seen,
@@ -29,6 +30,7 @@ console = Console()
 SOURCE_ICONS = {
     "reddit": "[bold orange1]Reddit[/]",
     "reddit_localllama": "[bold orange1]Reddit LLaMA[/]",
+    "reddit_machinelearning": "[bold orange1]Reddit ML[/]",
     "reddit_openai": "[bold orange1]Reddit OpenAI[/]",
     "reddit_programming": "[bold orange1]Reddit Prog[/]",
     "reddit_technology": "[bold orange1]Reddit Tech[/]",
@@ -174,7 +176,8 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
     """run_sector_pipeline() 결과를 Telegram HTML 섹터별 청크 리스트로 변환.
 
     각 청크 = 단일 섹터의 독립적인 HTML 메시지 (자체 헤더 + 1-5개 아이템).
-    빈 섹터도 `(없음)` 플레이스홀더 청크를 포함해 반환 길이 = len(SECTORS).
+    빈 섹터도 `(없음)` 플레이스홀더 청크를 포함한다. result["sectors"]에 존재하는
+    섹터만 청크로 만든다 (롤백 시 다양화 섹터가 빠지면 6개 청크가 된다).
     mode_label은 하위 호환을 위해 남겨두었지만 현재 출력에는 사용하지 않는다.
     """
     del mode_label  # 각 청크가 독립 메시지이므로 전체 래퍼 헤더는 출력하지 않음
@@ -185,6 +188,8 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
     chunks: list[str] = []
 
     for name, cfg in SECTORS:
+        if name not in sectors:
+            continue  # 롤백 등으로 비활성화된 섹터는 청크를 만들지 않음
         emoji = cfg.get("emoji", "")
         label = cfg.get("label", name)
         sector_items = sectors.get(name, [])
@@ -486,8 +491,11 @@ def cli():
             console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
-    # 섹터별 재분배
-    display_sectors: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
+    # 섹터별 재분배 (롤백 시 다양화 섹터는 pipeline_result["sectors"]에 없으므로 제외).
+    active_sector_names = set(pipeline_result["sectors"].keys())
+    display_sectors: dict[str, list[dict]] = {
+        name: [] for name, _ in SECTORS if name in active_sector_names
+    }
     for w in wrapped:
         sec = w.get("_sector")
         if sec in display_sectors:
@@ -495,8 +503,47 @@ def cli():
 
     # 섹터별 slot 제한 적용
     for name, cfg in SECTORS:
+        if name not in display_sectors:
+            continue
         limit = cfg.get("count", 5)
         display_sectors[name] = display_sectors[name][:limit]
+
+    # 다양성 floor: filter_seen으로 비워진 키워드 섹터를 신선한(미노출) 아이템으로 backfill.
+    #   - sectors_full(count-slice 이전 전체 풀)에서 끌어오므로 슬라이스에서 밀린 신선
+    #     아이템도 승격 가능.
+    #   - get_used_urls()(이력) + 이번 런에서 이미 보여준 URL 둘 다 제외 → 재노출 방지.
+    #   - URL 라우팅 섹터와 trending_catch_all(corroboration-gated)은 건너뜀.
+    #   - DISABLE_DIVERSIFY_SECTORS=1 이면 이 블록 전체가 inert (롤백 cross-module gate).
+    if pipeline_result.get("diversify_enabled", True):
+        MIN_SECTOR_FLOOR = 1
+        sectors_full = pipeline_result.get(
+            "sectors_full", pipeline_result.get("sectors", {})
+        )
+        used_urls = get_used_urls()
+        shown_now = {
+            w.get("url")
+            for items in display_sectors.values()
+            for w in items
+        }
+        for name, _cfg in SECTORS:
+            if name not in display_sectors:
+                continue  # 비활성(롤백) 섹터는 건너뜀
+            if name not in KEYWORD_SECTORS:
+                continue  # URL 라우팅 섹터는 floor 대상이 아님
+            if name == "trending_catch_all":
+                continue  # corroboration-gated; backfill은 cross_source>=2 게이트를 우회함
+            if len(display_sectors[name]) >= MIN_SECTOR_FLOOR:
+                continue
+            backfill = [
+                item
+                for item in sectors_full.get(name, [])
+                if item.get("url") not in used_urls
+                and item.get("url") not in shown_now
+            ]
+            backfill.sort(key=lambda x: x.get("final_score", 0), reverse=True)
+            needed = MIN_SECTOR_FLOOR - len(display_sectors[name])
+            display_sectors[name].extend(backfill[:needed])
+            shown_now.update(it.get("url") for it in backfill[:needed])
 
     display_result = {"sectors": display_sectors}
 
