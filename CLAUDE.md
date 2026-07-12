@@ -36,7 +36,7 @@ anthropic 모드는 점수 없이 **최신 날짜 기준**으로 뉴스 2개 + �
 
 ## 인터랙티브 강화 프로토콜 (--enrich)
 
-**언제**: Claude Code에서 대화형으로 주제를 선정할 때, `python main.py --mode sector --enrich` 실행 후.
+**언제**: Claude가 실행 주체인 모든 런에 적용된다 — 대화형 세션(`python main.py --mode sector --enrich` 실행 후)과 cloud routine(매일 KST 08/20시 Telegram 발송) 모두. routine에서는 여기에 더해, 파이썬 수집기가 강등(::warning::)되거나 0건인 소스를 insane-search로 직접 수집해 보충한다.
 
 **절차**:
 
