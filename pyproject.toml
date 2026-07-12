@@ -16,6 +16,7 @@ hot-topic = "main:cli"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+fetch = ["curl_cffi==0.15.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

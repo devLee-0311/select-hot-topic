@@ -13,14 +13,14 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
+import net
 from history import get_used_urls, save_topic
 from modes import MODES, SECTOR_CONFIG
 from pipeline import (
-    DISPLAY_SCORE_CAP_BY_CROSS,
-    FRESH_SINGLETON_CAP,
     SECTORS,
     SECTORS_BY_KEY,
     adapt_for_filter_seen,
+    display_score,
     run_sector_pipeline,
 )
 
@@ -208,11 +208,13 @@ def format_sector_html(result: dict, mode_label: str, max_score: float = 6.0) ->
 
                 final_score = item.get("final_score", 0)
                 cross = item.get("cross_source_count", 1)
-                cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
-                if cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
-                    cap = FRESH_SINGLETON_CAP
-                display_score = min(cap, int(final_score / max_score * 99) if max_score > 0 else 0)
-                score_line = f"   📊 {display_score}/100"
+                item_display_score = display_score(
+                    final_score,
+                    cross,
+                    item.get("recency_multiplier", 1.0),
+                    max_score,
+                )
+                score_line = f"   📊 {item_display_score}/100"
 
                 if cross >= 2:
                     score_line += f"  🔗 {cross} 소스"
@@ -383,6 +385,154 @@ def format_anthropic_html(kind: str = "all") -> str:
     return html_out
 
 
+def format_enrich_block(display_sectors: dict[str, list[dict]]) -> str:
+    """DISPLAY된 모든 아이템을 --enrich용 파싱 가능한 블록으로 변환.
+
+    Claude Code 에이전트가 insane-search 스킬로 URL 전문을 수집해 신선도·주제
+    적합성을 검증하고 정확한 한글 요약을 작성할 수 있도록, 섹터 순서·표시 순서
+    그대로 title/url/sector/desc를 나열한다 (grep-friendly, 형식 고정).
+    """
+    lines = ["=== ENRICH CANDIDATES ==="]
+    idx = 0
+    for name, _cfg in SECTORS:
+        for item in display_sectors.get(name, []):
+            idx += 1
+            desc = item.get("description", "") or "EMPTY"
+            lines.append(
+                f"{idx}. {item.get('title', '')} | {item.get('url', '')} | "
+                f"sector={name} | desc={desc}"
+            )
+    lines.append("=== END ENRICH CANDIDATES ===")
+    return "\n".join(lines)
+
+
+def apply_filter_seen_by_sector(pipeline_result: dict) -> tuple[list[dict], dict[str, list[dict]]]:
+    """섹터 파이프라인 결과에 filter_seen을 적용하고 섹터별로 재분배.
+
+    1. pipeline_result["sectors"]의 모든 섹터 아이템을 flat 리스트로 변환
+    2. adapt_for_filter_seen()으로 filter_seen 호환 포맷으로 변환, 원본 아이템(_pipeline_item)과
+       섹터(_sector)를 각 wrapped 항목에 부착
+    3. filter_seen()으로 이력에 이미 있는 항목 제외
+    4. 살아남은 항목을 원래 섹터로 재분배 후 섹터별 count 슬롯 재적용
+
+    Returns:
+        (wrapped, display_sectors) 튜플.
+        wrapped: filter_seen을 통과한 topic dict 리스트 (이력 저장에 사용).
+        display_sectors: {섹터명: [파이프라인 아이템, ...]} — slot cap 적용됨.
+        wrapped가 비어 있으면 display_sectors의 모든 섹터도 빈 리스트가 된다.
+    """
+    all_topics_flat: list[dict] = []
+    for name, _cfg in SECTORS:
+        all_topics_flat.extend(pipeline_result["sectors"].get(name, []))
+
+    wrapped = adapt_for_filter_seen(all_topics_flat, max_score=pipeline_result.get("max_score", 6.0))
+
+    # 섹터 메타데이터 전달 (재분배용)
+    for i, item in enumerate(all_topics_flat):
+        wrapped[i]["_pipeline_item"] = item
+        wrapped[i]["_sector"] = item.get("sector")
+
+    wrapped = filter_seen(wrapped)
+
+    # 섹터별 재분배
+    display_sectors: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
+    for w in wrapped:
+        sec = w.get("_sector")
+        if sec in display_sectors:
+            display_sectors[sec].append(w["_pipeline_item"])
+
+    # 섹터별 slot 제한 적용
+    for name, cfg in SECTORS:
+        limit = cfg.get("count", 5)
+        display_sectors[name] = display_sectors[name][:limit]
+
+    return wrapped, display_sectors
+
+
+def fill_missing_descriptions(
+    display_sectors: dict[str, list[dict]],
+    *,
+    top_n_per_sector: int | None = None,
+    max_workers: int = 4,
+    timeout: int = 8,
+) -> dict[str, list[dict]]:
+    """DISPLAY될 아이템 중 description이 비어있거나 title과 동일한 것만 골라
+    net.extract_meta_description()으로 헤드리스 보강한다 (병렬, per-item 타임아웃 가드).
+
+    - 이미 real description이 있는 아이템은 절대 덮어쓰지 않는다.
+    - 추출 실패(None/예외/타임아웃)면 해당 아이템은 그대로 둔다 (title fallback 유지).
+    - display_sectors는 이미 슬롯 캡이 적용된 작은 집합이므로 그대로 순회한다
+      (top_n_per_sector로 필요시 추가 제한 가능).
+    """
+    targets: list[dict] = []
+    for items in display_sectors.values():
+        subset = items[:top_n_per_sector] if top_n_per_sector else items
+        for item in subset:
+            desc = (item.get("description") or "").strip()
+            title = (item.get("title") or "").strip()
+            if not desc or desc == title:
+                targets.append(item)
+
+    if not targets:
+        return display_sectors
+
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        futures = {
+            executor.submit(net.extract_meta_description, item.get("url", ""), timeout=timeout): item
+            for item in targets
+        }
+        # per-item 타임아웃 가드: 개별 future가 오래 걸려도 전체 배치가 멈추지 않는다.
+        for future, item in futures.items():
+            try:
+                desc = future.result(timeout=timeout)
+            except Exception:
+                continue
+            if desc:
+                item["description"] = desc
+    finally:
+        # wait=False: 아직 끝나지 않은(타임아웃된) 작업 완료를 기다리며 블로킹하지 않는다.
+        executor.shutdown(wait=False)
+
+    return display_sectors
+
+
+# 성능 저하(degradation) 원장의 outcome 코드 -> 사람이 읽는 한국어 표현.
+_DEGRADATION_OUTCOME_KR = {
+    "curl_cffi": "curl_cffi 폴백",
+    "jina": "jina 폴백",
+    "all_failed": "전체 실패",
+    "source_empty": "빈 결과",
+}
+
+
+def _dedupe_degradation_events(events: list[dict]) -> list[tuple[str, str]]:
+    """degradation 이벤트를 (label, outcome) 쌍으로 중복 제거 (최초 등장 순서 유지).
+
+    같은 소스가 반복 실패해도 동일한 (label, outcome) 조합은 한 줄로만 보고한다.
+    """
+    seen: set[tuple[str, str]] = set()
+    pairs: list[tuple[str, str]] = []
+    for ev in events:
+        key = (ev["label"], ev["outcome"])
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+    return pairs
+
+
+def _emit_degradation_warnings(pairs: list[tuple[str, str]]) -> None:
+    """GitHub Actions ::warning:: 어노테이션을 stderr로 출력 (stdout은 절대 오염하지 않음)."""
+    for label, outcome in pairs:
+        print(f"::warning::fetch degraded: {label} → {outcome}", file=sys.stderr)
+
+
+def _format_degradation_footer(pairs: list[tuple[str, str]]) -> str:
+    """stdout에 붙일 압축된 degradation 안내 문구 (Telegram 메시지 1개 분량)."""
+    parts = [f"{label} → {_DEGRADATION_OUTCOME_KR.get(outcome, outcome)}" for label, outcome in pairs]
+    return "⚠️ 수집 상태: " + ", ".join(parts)
+
+
 def cli():
     """CLI 진입점."""
     parser = argparse.ArgumentParser(
@@ -424,9 +574,22 @@ def cli():
             "(CI에서 사용, 인터랙티브 프롬프트 우회)."
         ),
     )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help=(
+            "rich 모드 전용: 정상 출력 뒤에 파싱 가능한 ENRICH CANDIDATES 블록을 "
+            "stdout에 추가 출력 (Claude Code 에이전트가 URL 전문을 수집해 요약을 "
+            "보강할 때 사용). markdown 모드에서는 무시된다."
+        ),
+    )
     args = parser.parse_args()
 
     load_dotenv()
+
+    # 이번 실행의 degradation 원장을 초기화 (동일 프로세스 내 반복 호출 시 이전 실행의
+    # 이벤트가 누수되지 않도록; 테스트에서 main.cli()를 여러 번 호출하는 경우 특히 중요).
+    net.reset()
 
     markdown_mode = args.fmt == "markdown"
 
@@ -502,37 +665,31 @@ def cli():
     pipeline_result = run_sector_pipeline(all_items, pipeline_cfg)
 
     # filter_seen 적용: 섹터 아이템을 flat 리스트로 변환 → 필터 → 섹터별 재분배
-    all_topics_flat: list[dict] = []
-    for name, _cfg in SECTORS:
-        all_topics_flat.extend(pipeline_result["sectors"].get(name, []))
+    wrapped, display_sectors = apply_filter_seen_by_sector(pipeline_result)
 
-    wrapped = adapt_for_filter_seen(all_topics_flat, max_score=pipeline_result.get("max_score", 6.0))
-
-    # 섹터 메타데이터 전달 (재분배용)
-    for i, item in enumerate(all_topics_flat):
-        wrapped[i]["_pipeline_item"] = item
-        wrapped[i]["_sector"] = item.get("sector")
-
-    wrapped = filter_seen(wrapped)
+    # degradation 관측 가능성: markdown(CI) 모드에서만 다룬다. rich 모드는 기존 동작 유지.
+    degraded_pairs: list[tuple[str, str]] = []
+    if markdown_mode:
+        degraded_pairs = _dedupe_degradation_events(net.get_degradation_report())
+        _emit_degradation_warnings(degraded_pairs)
 
     if not wrapped:
         if markdown_mode:
             print("새로운 추천 토픽이 없습니다.", file=sys.stderr)
+            sys.stdout.reconfigure(encoding="utf-8")
+            if degraded_pairs:
+                # 수집 저하로 인해 결과가 없을 가능성 → 이유를 밝히는 footer를 Telegram으로 전달.
+                print(_format_degradation_footer(degraded_pairs))
+            else:
+                # 진짜로 조용한 날 (cron 미실행과 구분하기 위한 heartbeat).
+                print("이상없음 — 새로운 추천 토픽 없음")
         else:
             console.print("[bold red]새로운 추천 토픽이 없습니다.[/] (이전 추천이 모두 이력에 있음)")
         return
 
-    # 섹터별 재분배
-    display_sectors: dict[str, list[dict]] = {name: [] for name, _ in SECTORS}
-    for w in wrapped:
-        sec = w.get("_sector")
-        if sec in display_sectors:
-            display_sectors[sec].append(w["_pipeline_item"])
-
-    # 섹터별 slot 제한 적용
-    for name, cfg in SECTORS:
-        limit = cfg.get("count", 5)
-        display_sectors[name] = display_sectors[name][:limit]
+    # 제목만 있는(description 없음/제목과 동일) 표시 대상 아이템을 헤드리스로 보강.
+    # display_sectors는 이미 slot cap이 적용된 작은 집합이라 markdown/rich 양쪽에 안전하게 공유.
+    display_sectors = fill_missing_descriptions(display_sectors)
 
     display_result = {"sectors": display_sectors}
 
@@ -543,11 +700,15 @@ def cli():
             mode_config.label,
             max_score=pipeline_result.get("max_score", 6.0),
         )
+        if degraded_pairs:
+            # 별도 @@@SECTOR_BREAK@@@ 세그먼트로 붙여 Telegram에 독립 메시지로 전달.
+            chunks = chunks + [_format_degradation_footer(degraded_pairs)]
         output = "\n@@@SECTOR_BREAK@@@\n".join(chunks)
         print(output)
         # auto-save: 출력된 모든 아이템의 URL을 이력에 저장 (프롬프트 없음).
         # 파이프라인 워크플로에서 같은 주제가 다음 런에 재추천되지 않도록 dedup 용도.
-        if args.auto_save and output.strip():
+        # footer/heartbeat만 있는 경우는 실제 토픽이 아니므로 wrapped 존재 여부로 판단한다.
+        if args.auto_save and wrapped:
             for name, _cfg in SECTORS:
                 for item in display_sectors.get(name, []):
                     save_topic(
@@ -578,10 +739,12 @@ def cli():
             raw_eng = item.get("engagement", 0)
             source = item.get("source", "")
             _cross = item.get("cross_source_count", 1)
-            _cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(_cross, 5), 99)
-            if _cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
-                _cap = FRESH_SINGLETON_CAP
-            score = min(_cap, int(item.get("final_score", 0) / _max * 99) if _max > 0 else 0)
+            score = display_score(
+                item.get("final_score", 0),
+                _cross,
+                item.get("recency_multiplier", 1.0),
+                _max,
+            )
             reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
             if _cross >= 2:
                 reasons.append(f"교차 소스 {_cross}곳 언급")
@@ -599,6 +762,12 @@ def cli():
                 }],
             }
             display_topic(legacy_topic, rank=rank)
+
+    # --enrich: Claude Code 에이전트가 URL 전문을 수집해 요약을 보강할 수 있도록
+    # 파싱 가능한 후보 블록을 정상 출력 뒤에 추가 출력 (rich 모드 전용, plain print
+    # — rich 마크업 해석을 피하고 grep-friendly한 원본 텍스트를 보장).
+    if args.enrich:
+        print(format_enrich_block(display_sectors))
 
     # 이력 저장 확인
     console.print()

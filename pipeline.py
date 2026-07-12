@@ -196,6 +196,25 @@ SIMILARITY_THRESHOLD = 0.4
 DISPLAY_SCORE_CAP_BY_CROSS = {1: 70, 2: 85, 3: 99, 4: 99, 5: 99}
 FRESH_SINGLETON_CAP = 90  # singleton + 신선도(<6h, multiplier>=1.3) 일 때 상한 완화
 
+
+def display_score(
+    final_score: float,
+    cross_source_count: int,
+    recency_multiplier: float,
+    max_score: float,
+) -> int:
+    """0~99 디스플레이 스코어 계산 (cross-source 기반 상한 캡 적용).
+
+    cap은 cross_source_count에 따라 DISPLAY_SCORE_CAP_BY_CROSS에서 결정.
+    단, singleton(cross_source_count==1)이면서 신선한 아이템(recency_multiplier>=1.3)이면
+    상한을 FRESH_SINGLETON_CAP로 완화 (속보 반응성). max_score<=0이면 relative=0.
+    """
+    cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross_source_count, 5), 99)
+    if cross_source_count == 1 and recency_multiplier >= 1.3:
+        cap = FRESH_SINGLETON_CAP
+    relative = int(final_score / max_score * 99) if max_score > 0 else 0
+    return min(cap, relative)
+
 # 시간 감쇠 스텝 버킷: (max_hours, multiplier).
 # 마지막 튜플의 max_hours=None은 "그보다 오래됨"의 기본값을 의미.
 RECENCY_BUCKETS: list[tuple[float | None, float]] = [
@@ -754,12 +773,12 @@ def adapt_for_filter_seen(items: list[dict], max_score: float = 6.0) -> list[dic
         raw_eng = _get_raw_engagement(item)
         source = item.get("source", "")
         cross = item.get("cross_source_count", 1)
-        cap = DISPLAY_SCORE_CAP_BY_CROSS.get(min(cross, 5), 99)
-        # 신선한 singleton은 상한을 FRESH_SINGLETON_CAP로 완화 (속보 반응성)
-        if cross == 1 and item.get("recency_multiplier", 1.0) >= 1.3:
-            cap = FRESH_SINGLETON_CAP
-        relative = int(item.get("final_score", 0) / max_score * 99) if max_score > 0 else 0
-        score = min(cap, relative)
+        score = display_score(
+            item.get("final_score", 0),
+            cross,
+            item.get("recency_multiplier", 1.0),
+            max_score,
+        )
 
         reasons = [f"{source} 화제 (engagement {int(raw_eng):,})"]
         if cross >= 2:

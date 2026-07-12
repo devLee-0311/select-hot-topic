@@ -5,8 +5,9 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
-import requests
 from bs4 import BeautifulSoup
+
+import net
 
 BLOG_URL = "https://claude.com/blog"
 NEWS_URL = "https://www.anthropic.com/news"
@@ -47,10 +48,11 @@ def _parse_title(raw: str) -> tuple[str, datetime | None]:
 
 def _fetch_meta_description(url: str) -> str:
     """개별 글 페이지에서 og:description 추출."""
+    result = net.fetch_html(url, headers=HEADERS, timeout=TIMEOUT)
+    if result.text is None:
+        return ""
     try:
-        resp = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(result.text, "html.parser")
         og = soup.find("meta", attrs={"property": "og:description"})
         if og:
             return og.get("content", "").strip()
@@ -76,14 +78,12 @@ def _enrich_descriptions(items: list[dict]) -> list[dict]:
 
 def _fetch_page(url: str, path_prefix: str) -> list[dict]:
     """단일 페이지에서 글 목록 수집. 날짜 prefix가 있으면 published_at 필드에 저장."""
-    try:
-        resp = requests.get(url, timeout=TIMEOUT, headers=HEADERS)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  [!] Anthropic 페이지 요청 실패 ({url}): {e}", file=sys.stderr)
+    result = net.fetch_html(url, headers=HEADERS, timeout=TIMEOUT)
+    if result.text is None:
+        print(f"  [!] Anthropic 페이지 요청 실패 ({url}): 모든 fetch 티어 실패", file=sys.stderr)
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(result.text, "html.parser")
     results = []
     seen = set()
 
@@ -133,4 +133,6 @@ def fetch_anthropic_releases() -> list[dict]:
     news_items = _sort_by_date(_fetch_page(NEWS_URL, "/news/"))[:FETCH_PER_PAGE]
 
     combined = blog_items + news_items
+    if not combined:
+        net.record_source_empty("anthropic_releases")
     return _enrich_descriptions(combined)

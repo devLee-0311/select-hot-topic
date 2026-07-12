@@ -2,8 +2,9 @@
 
 import sys
 
-import requests
 from bs4 import BeautifulSoup
+
+import net
 
 TRENDING_URL = "https://github.com/trending"
 KEYWORDS = [
@@ -81,22 +82,19 @@ def _parse_repo_row(article) -> dict | None:
 
 def fetch_github_trending() -> list[dict]:
     """GitHub Trending에서 AI/Claude 관련 레포를 필터링하여 반환."""
-    try:
-        resp = requests.get(
-            TRENDING_URL,
-            params={"since": "daily"},
-            timeout=TIMEOUT,
-            headers={
-                "User-Agent": "Mozilla/5.0 (compatible; hot-topic-bot/0.1)",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  [!] GitHub Trending 요청 실패: {e}", file=sys.stderr)
+    result = net.fetch_html(
+        f"{TRENDING_URL}?since=daily",
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; hot-topic-bot/0.1)",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        timeout=TIMEOUT,
+    )
+    if result.text is None:
+        print("  [!] GitHub Trending 요청 실패: 모든 fetch 티어 실패", file=sys.stderr)
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(result.text, "html.parser")
     results = []
 
     # 여러 셀렉터 시도 (GitHub UI가 변경될 수 있음)
@@ -123,5 +121,8 @@ def fetch_github_trending() -> list[dict]:
                 "total_stars": parsed["total_stars"],
                 "engagement": parsed["stars_today"],
             })
+
+    if not results:
+        net.record_source_empty("github_trending")
 
     return results

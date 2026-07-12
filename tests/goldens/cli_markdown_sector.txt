@@ -1,0 +1,31 @@
+📰 <b>Anthropic 공식 뉴스 &amp; 블로그</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+🧡 <b>Claude Code</b>
+
+1️⃣ <a href="https://hn.example.com/claude-code-subagents">Claude Code subagent tips for teams</a>
+   📊 70/100
+   HN
+@@@SECTOR_BREAK@@@
+🤖 <b>에이전트 / 자동화</b>
+
+1️⃣ <a href="https://github.com/example/langgraph-release">LangGraph powered agent workflow release</a>
+   📊 70/100
+   GitHub
+@@@SECTOR_BREAK@@@
+💻 <b>로컬 LLM</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+⚙️ <b>AI 인프라 / 툴링</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+🔬 <b>AI 뉴스 &amp; 연구</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+🔥 <b>트렌딩</b>
+
+(없음)

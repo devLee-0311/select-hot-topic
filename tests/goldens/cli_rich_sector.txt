@@ -1,0 +1,44 @@
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 섹터별 핫토픽 파인더                                                                             │
+│ 7개 섹터 (Anthropic공식 / Claude Code / 에이전트 / 로컬LLM / AI인프라 / AI뉴스연구 / 트렌딩)     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  OK A: 1개 수집
+  OK B: 1개 수집
+
+총 2개 항목 수집 완료. 분석 중...
+
+
+🧡 Claude Code
+
+┌────────────── 추천 주제 #1: "[🧡 Claude Code] Claude Code subagent tips for teams" ──────────────┐
+│                                                                                                  │
+│  스코어: 70/100 ██████████████░░░░░░                                                             │
+│                                                                                                  │
+│  선정 근거:                                                                                      │
+│    - hacker_news 화제 (engagement 500)                                                           │
+│    - sector:claude_code                                                                          │
+│                                                                                                  │
+│  레퍼런스:                                                                                       │
+│    [1] HN Claude Code subagent tips for teams                                                    │
+│        https://hn.example.com/claude-code-subagents (engagement: 500)                            │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+🤖 에이전트 / 자동화
+
+┌──────── 추천 주제 #2: "[🤖 에이전트 / 자동화] LangGraph powered agent workflow release" ─────────┐
+│                                                                                                  │
+│  스코어: 70/100 ██████████████░░░░░░                                                             │
+│                                                                                                  │
+│  선정 근거:                                                                                      │
+│    - github_trending 화제 (engagement 300)                                                       │
+│    - sector:agents                                                                               │
+│                                                                                                  │
+│  레퍼런스:                                                                                       │
+│    [1] GitHub LangGraph powered agent workflow release                                           │
+│        https://github.com/example/langgraph-release (engagement: 300)                            │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+입력 없음 - 이력에 저장하지 않았습니다.

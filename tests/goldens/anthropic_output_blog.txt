@@ -1,0 +1,8 @@
+📝 <b>Anthropic 블로그 (최신 3개)</b>
+
+<b>1.</b> <a href="https://claude.com/blog/post-1">Anthropic blog post 1</a> (2026-07-11)
+  Blog description number 1
+<b>2.</b> <a href="https://claude.com/blog/post-2">Anthropic blog post 2</a> (2026-07-07)
+  Blog description number 2
+<b>3.</b> <a href="https://claude.com/blog/post-3">Anthropic blog post 3</a> (2026-07-06)
+  Blog description number 3

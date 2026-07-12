@@ -4,6 +4,8 @@ import sys
 
 import requests
 
+import net
+
 SEARCH_URL = "https://www.youtube.com/results"
 QUERIES = [
     "claude code", "anthropic claude code", "claude code tutorial",
@@ -15,31 +17,37 @@ TIMEOUT = 10
 
 def _search_youtube(query: str) -> list[dict]:
     """YouTube 검색 결과 페이지를 파싱하여 영상 목록 반환."""
-    try:
-        resp = requests.get(
-            SEARCH_URL,
-            params={"search_query": query, "sp": "CAISBAgBEAE%3D"},  # 최근 1주일, 관련성순
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=TIMEOUT,
-        )
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"  [!] YouTube 검색 실패 ({query}): {e}", file=sys.stderr)
+    # sp 파라미터가 이미 퍼센트 인코딩된 값이라 requests의 params 인코딩과
+    # 동일한 결과를 내도록 Request.prepare()로 최종 URL을 미리 만든다.
+    prepared_url = requests.Request(
+        "GET",
+        SEARCH_URL,
+        params={"search_query": query, "sp": "CAISBAgBEAE%3D"},  # 최근 1주일, 관련성순
+    ).prepare().url
+
+    result = net.fetch_html(
+        prepared_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        timeout=TIMEOUT,
+    )
+    if result.text is None:
+        print(f"  [!] YouTube 검색 실패 ({query}): 모든 fetch 티어 실패", file=sys.stderr)
         return []
 
+    resp_text = result.text
     results = []
     # YouTube 검색 결과는 JSON이 HTML 안에 포함됨
     import json
     import re
 
     # ytInitialData에서 영상 데이터 추출
-    match = re.search(r"var ytInitialData\s*=\s*({.*?});\s*</script>", resp.text)
+    match = re.search(r"var ytInitialData\s*=\s*({.*?});\s*</script>", resp_text)
     if not match:
         # 대안 패턴
-        match = re.search(r"ytInitialData\s*=\s*({.*?});\s*", resp.text)
+        match = re.search(r"ytInitialData\s*=\s*({.*?});\s*", resp_text)
     if not match:
         return []
 
@@ -106,6 +114,9 @@ def fetch_youtube_search(queries: list[str] | None = None) -> list[dict]:
             if item["url"] not in seen_urls:
                 seen_urls.add(item["url"])
                 results.append(item)
+
+    if not results:
+        net.record_source_empty("youtube")
 
     # engagement 높은 순, 상위 15개
     results.sort(key=lambda x: x["engagement"], reverse=True)

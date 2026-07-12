@@ -1,0 +1,6 @@
+📰 <b>Anthropic 뉴스 (최신 2개)</b>
+
+<b>1.</b> <a href="https://www.anthropic.com/news/item-1">Anthropic news item 1</a> (2026-07-10)
+  News description number 1 that is somewhat long and might get truncated if it exceeds one hundred and twenty characte...
+<b>2.</b> <a href="https://www.anthropic.com/news/item-2">Anthropic news item 2</a> (2026-07-09)
+  News description number 2 that is somewhat long and might get truncated if it exceeds one hundred and twenty characte...

@@ -1,0 +1,17 @@
+📢 <b>Anthropic 공식 — 최신 뉴스 &amp; 블로그</b>
+
+📰 <b>뉴스 (최신 2개)</b>
+
+<b>1.</b> <a href="https://www.anthropic.com/news/item-1">Anthropic news item 1</a> (2026-07-10)
+  News description number 1 that is somewhat long and might get truncated if it exceeds one hundred and twenty characte...
+<b>2.</b> <a href="https://www.anthropic.com/news/item-2">Anthropic news item 2</a> (2026-07-09)
+  News description number 2 that is somewhat long and might get truncated if it exceeds one hundred and twenty characte...
+
+📝 <b>블로그 (최신 3개)</b>
+
+<b>1.</b> <a href="https://claude.com/blog/post-1">Anthropic blog post 1</a> (2026-07-11)
+  Blog description number 1
+<b>2.</b> <a href="https://claude.com/blog/post-2">Anthropic blog post 2</a> (2026-07-07)
+  Blog description number 2
+<b>3.</b> <a href="https://claude.com/blog/post-3">Anthropic blog post 3</a> (2026-07-06)
+  Blog description number 3

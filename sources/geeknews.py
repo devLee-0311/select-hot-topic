@@ -3,8 +3,9 @@
 import re
 import sys
 
-import requests
 from bs4 import BeautifulSoup
+
+import net
 
 BASE_URL = "https://news.hada.io"
 PAGES = ["/new", "/"]
@@ -25,21 +26,19 @@ def fetch_geeknews(keywords: list[str] | None = None) -> list[dict]:
     seen_ids = set()
 
     for page_path in PAGES:
-        try:
-            resp = requests.get(
-                f"{BASE_URL}{page_path}",
-                timeout=TIMEOUT,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; hot-topic-bot/0.1)",
-                    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-                },
-            )
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            print(f"  [!] GeekNews 요청 실패 ({page_path}): {e}", file=sys.stderr)
+        result = net.fetch_html(
+            f"{BASE_URL}{page_path}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; hot-topic-bot/0.1)",
+                "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+            },
+            timeout=TIMEOUT,
+        )
+        if result.text is None:
+            print(f"  [!] GeekNews 요청 실패 ({page_path}): 모든 fetch 티어 실패", file=sys.stderr)
             continue
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(result.text, "html.parser")
 
         for row in soup.select("div.topic_row"):
             # article ID 추출
@@ -105,6 +104,9 @@ def fetch_geeknews(keywords: list[str] | None = None) -> list[dict]:
                 "num_comments": comments,
                 "engagement": points + comments,
             })
+
+    if not results:
+        net.record_source_empty("geeknews")
 
     # engagement 높은 순
     results.sort(key=lambda x: x["engagement"], reverse=True)

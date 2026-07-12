@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 praw rich python-dotenv anthropic
+        run: pip install requests beautifulsoup4 praw rich python-dotenv anthropic curl_cffi==0.15.0
       - name: Collect sector topics
         run: python main.py --mode sector --format markdown --auto-save > sector_out.txt
         env:

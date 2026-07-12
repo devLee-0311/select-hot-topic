@@ -1,0 +1,39 @@
+📰 <b>Anthropic 공식 뉴스 &amp; 블로그</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+🧡 <b>Claude Code</b>
+
+1️⃣ <a href="https://hn.example.com/claude-code-tips?x=1&amp;y=2">Claude Code &lt;tips&gt; &amp; tricks for power users</a>
+   📊 74/100  🔗 2 소스
+   📝 A deep dive into Claude Code&#x27;s subagent system, hooks, and MCP integrations for power users who w...
+   HN
+   🔗 <a href="https://reddit.com/r/ClaudeAI/thread1">reddit_claude: Claude Code power user thread</a>
+
+2️⃣ <a href="https://example.com/mcp-roundup">MCP servers roundup</a>
+   📊 70/100
+   unknown_source_xyz
+@@@SECTOR_BREAK@@@
+🤖 <b>에이전트 / 자동화</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+💻 <b>로컬 LLM</b>
+
+(없음)
+@@@SECTOR_BREAK@@@
+⚙️ <b>AI 인프라 / 툴링</b>
+
+1️⃣ <a href="https://example.com/cursor-agent-mode">Cursor ships new agent mode</a>
+   📊 90/100
+   GitHub
+@@@SECTOR_BREAK@@@
+🔬 <b>AI 뉴스 &amp; 연구</b>
+
+1️⃣ <a href="https://example.com/scaling-law-paper">New scaling law paper from three labs</a>
+   📊 99/100  🔗 3 소스
+   Reddit ML
+@@@SECTOR_BREAK@@@
+🔥 <b>트렌딩</b>
+
+(없음)
