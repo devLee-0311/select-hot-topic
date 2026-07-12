@@ -1,5 +1,14 @@
 # Select Hot Topic — Project Instructions
 
+## 주제 서치 절차 (대화형)
+
+사용자가 주제 추천/서치를 요청하면 아래 순서를 따른다:
+
+1. `python main.py --mode sector --enrich` 실행으로 후보를 수집한다 (출력 끝의 `=== ENRICH CANDIDATES ===` 블록이 후보 목록).
+2. 각 후보 URL의 전문을 **insane-search 스킬로 수집**한다 — 아래 "인터랙티브 강화 프로토콜" 절차 준수. WebFetch는 insane-search가 실패하거나 대상이 일반 웹페이지일 때만 폴백으로 사용한다.
+3. 추가 탐색(Reddit, X/Twitter, YouTube, HN, GeekNews 등 차단·봇방어 플랫폼 검색)이 필요하면 WebFetch 대신 **insane-search를 우선 사용**한다.
+4. 전문 기반으로 신선도·주제 적합성·교차 참조를 검증한 뒤, 아래 "검색 결과 출력 형식"으로 추천한다.
+
 ## 검색 결과 출력 형식
 
 웹 검색 후 주제를 추천할 때 아래 형식을 따른다. **가장 흥미로운 주제 1개만** 출력한다.
